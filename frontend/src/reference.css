@@ -1,0 +1,174 @@
+/* Adapted from the supplied light interface references. */
+:root {
+  color: #1c1d20;
+  background: #f5f6f7;
+  --ink: #1c1d20;
+  --forest: #222326;
+  --muted: #747980;
+  --line: #e3e5e8;
+  --paper: #f5f6f7;
+  --white: #fff;
+  --lime: #222326;
+  --danger: #b45150;
+}
+html, body { background: var(--paper); }
+:focus-visible { outline-color: #779ad2; }
+h1, h2, h3 { letter-spacing: -.045em; }
+h1 { margin: 4px 0 25px; font-size: clamp(2.05rem, 8vw, 2.7rem); line-height: 1.04; font-weight: 690; }
+h2 { font-weight: 650; }
+.appShell, .isWorkout { color: var(--ink); background: var(--paper); }
+.page { padding-top: 34px; }
+.eyebrow, .cardIndex, .emptyOverline { color: #757980; font-size: .76rem; font-weight: 550; letter-spacing: 0; }
+.intro { color: var(--muted); }
+.heroSession, .emptyCard, .completedSession, .editorPanel, .programCard, .settingsBlock, .summaryCard, .chartCard {
+  border: 1px solid #e8e9ec;
+  border-radius: 24px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 7px 28px rgba(24, 31, 43, .035);
+}
+.heroSession { padding: 23px; }
+.heroKicker { color: #777b82; font-size: .78rem; font-weight: 560; }
+.phasePill, .programCard .phasePill { padding: 5px 11px; border: 0; background: #fff0d9; color: #7b560c; font-size: .72rem; font-weight: 650; }
+.phasePill.phase-light, .programCard .phasePill.phase-light { background: #e7f1fb; color: #416f9c; }
+.phasePill.phase-heavy, .programCard .phasePill.phase-heavy { background: #ffe9e5; color: #a34b49; }
+.heroTitle { margin: 29px 0 5px; font-size: clamp(1.75rem, 7vw, 2.25rem); font-weight: 690; line-height: 1.04; }
+.heroMeta { margin-bottom: 0; color: var(--muted); }
+.phaseRail { margin: 25px 0 18px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.phaseRail span { height: 7px; border-radius: 999px; opacity: .42; }
+.phaseRail span:nth-child(1) { background: #85a9dc; }
+.phaseRail span:nth-child(2) { background: #f0ce73; }
+.phaseRail span:nth-child(3) { background: #ec9392; }
+.phaseRail span.current { opacity: 1; }
+.heroExercises { margin-bottom: 19px; border-color: #e9eaec; }
+.heroExercise { min-height: 53px; border-color: #e9eaec; }
+.heroExercise span { color: #2b2d31; font-size: .87rem; }
+.heroExercise strong { color: #222326; font-size: .83rem; font-weight: 650; }
+.heroMore { color: var(--muted); }
+.heroFooter, .primaryButton { border: 0; border-radius: 999px; background: #222326; color: white; font-weight: 650; }
+.heroFooter { min-height: 51px; }
+.sectionHead { margin-top: 36px; margin-bottom: 12px; }
+.sectionHead h2 { font-size: 1.18rem; font-weight: 690; }
+.sectionHead > span { color: #8d9197; }
+.templateList, .historyList { overflow: hidden; padding: 0 17px; border: 1px solid #e8e9ec; border-radius: 23px; background: #fff; }
+.templateMini { min-height: 88px; border-color: #e9eaec; }
+.templateMini:last-child, .historyCard:last-child { border-bottom: 0; }
+.templateOrder, .programNumber { color: #92969d; font-weight: 590; }
+.templateDetails strong { font-weight: 650; }
+.templateDetails small { color: var(--muted); }
+.roundButton { border-color: #d8dade; background: #f5f6f7; color: var(--ink); }
+.hint { color: var(--muted); }
+.outlineButton { border-color: #cfd1d5; color: var(--ink); }
+.bottomNav { border-color: #e5e6e9; background: #fffffff2; }
+.bottomNav button { color: #888c93; }
+.bottomNav button.active { border-radius: 14px; background: #222326; color: white; font-weight: 600; }
+.bottomNav button.active::after { display: none; }
+.errorToast { background: #f9ebe9; color: #9d4646; }
+.loadingMark { background: #222326; }
+.emptyCard { min-height: 210px; }
+.emptyIcon { border-color: #e0e2e5; color: #303238; }
+.emptyCard h2 { font-size: 1.5rem; }
+.emptyCard p { color: var(--muted); }
+.completedSession { background: #eef5fb; border-color: #dbe8f2; }
+.completedTop { color: #4c7199; }
+.completedSymbol { background: #83a2db; }
+.completedSession h2 { font-weight: 690; }
+.completedSession p { color: #607485; }
+.completedSession button { border-color: #d5e2eb; color: #1c1d20; }
+.workoutTitle h1 { font-size: clamp(2rem, 8vw, 2.6rem); font-weight: 690; }
+.completionMeter { border-color: #e2e4e7; }
+.meterTrack { height: 6px; background: #e9eaed; }
+.meterTrack div { background: #83a2db; }
+.exerciseCard, .isWorkout .exerciseCard { padding: 21px; margin: 14px 0; border: 1px solid #e7e9ec; border-radius: 24px; background: #fff; box-shadow: 0 7px 28px rgba(24,31,43,.03); }
+.exerciseHead h2 { font-weight: 670; }
+.targetLine, .isWorkout .targetLine { margin: 20px 0 10px; padding: 16px; border: 0; border-radius: 16px; background: #f5f6f7; }
+.targetLine > div + div, .isWorkout .targetLine > div + div { border-color: #e1e3e6; }
+.targetLine strong, .isWorkout .targetLine strong { color: var(--ink); font-weight: 680; }
+.targetLine strong small { margin-left: 3px; }
+.textButton, .skipButton, .isWorkout .textButton { color: #35383e; }
+.setRow, .isWorkout .setRow { border-color: #e7e9ec; }
+.setRow input, .isWorkout .setRow input, .overrideBox input, .isWorkout .overrideBox input { border-color: #e1e3e6; border-radius: 11px; background: #f5f6f7; color: var(--ink); }
+.saveSet, .isWorkout .saveSet { border-radius: 11px; background: #222326; color: white; }
+.saveSet.saved, .isWorkout .saveSet.saved { background: #e4eef9; color: #365f8b; }
+.overrideBox, .isWorkout .overrideBox { border-color: #e1e3e6; }
+.overrideBox button, .isWorkout .overrideBox button, .isWorkout .finishButton { background: #222326; color: white; }
+.programPicker button, .metricTabs button, .phaseTabs button { border-color: #dedfe3; background: #fff; color: #565a61; }
+.programPicker button.chosen, .metricTabs button.active, .phaseTabs button.active { border-color: #222326; background: #222326; color: white; }
+.field input, .field select { border-color: #e1e3e6; border-radius: 11px; background: #f7f8f9; color: var(--ink); color-scheme: light; }
+.field input::placeholder { color: #9a9ea5; }
+.field input:focus, .field select:focus, .setRow input:focus, .overrideBox input:focus { outline-color: #83a2db; }
+.editorDivider, .programExercise { border-color: #e7e9ec; }
+.programCardTop, .programCard p, .field > span, .fieldHelp, .programExercise small, .summaryCard > span, .summaryCard small, .chartNote, .chartLabels { color: var(--muted); }
+.programActions button, .programExercise button { color: #303238; }
+.summaryCard strong, .summaryCard b, .chartValue { font-weight: 650; }
+.summaryDivider { background: #e7e9ec; }
+.progressFirstHead { margin-top: 16px; }
+.progressFilters { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; margin: 0 0 16px; }
+.progressFilter { position: relative; min-width: 0; }
+.filterLabel { display: block; margin: 0 0 7px; color: #6f747b; font-size: .75rem; font-weight: 590; }
+.filterTrigger { width: 100%; min-height: 48px; padding: 0 13px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #e0e2e6; border-radius: 13px; background: white; color: #222326; text-align: left; font-size: .9rem; font-weight: 600; box-shadow: 0 3px 12px rgba(24,31,43,.025); }
+.filterTrigger.open, .filterTrigger:focus-visible { border-color: #9ea3ab; outline: 2px solid #dce5f2; outline-offset: 1px; }
+.filterTrigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filterTrigger svg { flex: none; transition: transform 150ms ease; }
+.filterTrigger.open svg { transform: rotate(180deg); }
+.filterMenu { position: absolute; z-index: 10; top: calc(100% + 6px); left: 0; width: 100%; max-height: 250px; overflow-y: auto; padding: 5px; border: 1px solid #e1e3e6; border-radius: 15px; background: white; box-shadow: 0 15px 35px rgba(27,32,43,.13); }
+.filterMenu.above { top: auto; bottom: calc(100% + 6px); }
+.progressFilter:last-child .filterMenu { left: auto; right: 0; width: min(300px, calc(100vw - 34px)); }
+.filterMenu button { width: 100%; min-height: 42px; padding: 9px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; border-radius: 9px; background: transparent; color: #303238; text-align: left; font-size: .85rem; }
+.filterMenu button[aria-selected="true"] { background: #f0f2f5; color: #17181b; font-weight: 700; }
+.filterMenu button svg { flex: none; }
+.groupField { margin: 0 0 18px; }
+.groupChips { margin: 2px 0 10px; display: flex; flex-wrap: wrap; gap: 7px; }
+.groupChips button { min-height: 36px; padding: 6px 9px 6px 13px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid #dce6f3; border-radius: 999px; background: #eaf1fa; color: #304965; font-size: .82rem; font-weight: 630; }
+.groupChips button svg { flex: none; }
+.editorPanel .filterTrigger { background: #f7f8f9; box-shadow: none; }
+.allGroupsSelected { padding: 12px; border: 1px solid #e1e3e6; border-radius: 12px; color: var(--muted); font-size: .84rem; }
+.fieldError { display: block; margin-top: 7px; color: #b45150; font-size: .78rem; }
+.scheduleFields { margin-top: 17px; }
+.scheduleFields .filterTrigger { padding-inline: 10px; gap: 4px; font-size: .81rem; }
+.timeTriggerText { display: inline-flex; align-items: center; gap: 7px; }
+.timeMenu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: min(300px, calc(100vw - 34px)); padding: 13px; border: 1px solid #e1e3e6; border-radius: 17px; background: white; box-shadow: 0 15px 35px rgba(27,32,43,.13); }
+.timeMenu.above { top: auto; bottom: calc(100% + 6px); }
+.timeMenuColumns { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.timeColumn { min-width: 0; }
+.timeColumn > span { display: block; margin-bottom: 7px; color: #777b82; font-size: .74rem; font-weight: 650; }
+.timeChoices { height: 208px; overflow-y: auto; padding: 3px; border: 1px solid #eceef0; border-radius: 11px; scrollbar-width: thin; }
+.timeChoices button { width: 100%; min-height: 37px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: .86rem; }
+.timeChoices button[aria-selected="true"] { background: #222326; color: white; font-weight: 700; }
+.timeDone { width: 100%; min-height: 42px; margin-top: 12px; border: 0; border-radius: 999px; background: #222326; color: white; font-size: .84rem; font-weight: 650; }
+.metricTabs button, .phaseTabs button { font-weight: 700; }
+.chartLegend { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.chartLegend span { display: inline-flex; align-items: center; gap: 6px; color: #60656c; font-size: .73rem; line-height: 1.3; }
+.chartLegend i { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+.gridLine { stroke: #e5e7ea; }
+.chartLine { stroke: #83a2db; }
+.chartDot { fill: #83a2db; stroke: white; }
+.historyCard { border-color: #e7e9ec; }
+.historyChevron { color: #373a40; }
+.isWorkout { --ink: #1c1d20; --muted: #747980; --line: #e3e5e8; --paper: #f5f6f7; --forest: #222326; color: var(--ink); background: var(--paper); }
+.isWorkout .eyebrow, .isWorkout .backButton { color: var(--ink); }
+.isWorkout .meterTrack { background: #e9eaed; }
+.isWorkout .meterTrack div { background: #83a2db; }
+@media (hover: hover) and (pointer: fine) {
+  .heroFooter:hover, .primaryButton:hover, .isWorkout .finishButton:hover { background: #3a3b40; filter: none; }
+  .outlineButton:hover, .roundButton:hover { background: #e9eaec; }
+  .bottomNav button:hover { color: #222326; }
+  .bottomNav button.active:hover { color: white; }
+  .filterMenu button:hover { background: #f5f6f7; }
+  .groupChips button:hover { background: #ddeaf8; }
+  .timeChoices button:hover:not([aria-selected="true"]) { background: #f0f2f5; }
+}
+@media (max-width: 390px) {
+  .page { padding-top: 27px; }
+  .heroSession { padding: 20px; }
+  .exerciseCard, .isWorkout .exerciseCard { padding: 16px; }
+  .targetLine, .isWorkout .targetLine { padding: 13px; }
+  .phaseTabs button { padding: 6px 8px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .bottomNav { background: white; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --muted: #42464d; --line: #9da1a8; }
+  .bottomNav { background: white; }
+}
