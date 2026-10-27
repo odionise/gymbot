@@ -5,7 +5,7 @@ import { api } from './api'
 import { ChoiceDropdown } from './ChoiceDropdown'
 import { muscleGroups as suggestedGroups, parseMuscleGroups } from './muscleGroups'
 import { TimePicker } from './TimePicker'
-import { MovementCatalog } from './MovementCatalog'
+import { MovementCatalog, movementKinds, timedOptions } from './MovementCatalog'
 import { filterMovements, normalizeMovementSearch } from './movementSearch'
 import { countWord, formatWeight } from './App'
 import type { Exercise, ExerciseInput, Movement, Template } from './types'
@@ -15,7 +15,7 @@ const emptyExercise: ExerciseInput = {
   name: '', position: 0, sets_count: 3, medium_weight: 0, weight_step: 2.5,
   light_factor: 0.9, heavy_factor: 1.05,
   light_min: 12, light_max: 15, medium_min: 8, medium_max: 12, heavy_min: 6, heavy_max: 8,
-  movement_id: null, rep_min: 6, rep_max: 12, rir_target: 2,
+  movement_id: null, rep_min: 6, rep_max: 12, rir_target: 2, duration_minutes: null,
 }
 
 function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, run }: {
@@ -49,15 +49,14 @@ function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, 
   return <form className="editorPanel" onSubmit={save}>
     <div className="editorTitle"><h3>{exercise ? 'Изменить упражнение' : 'Новое упражнение'}</h3><button type="button" onClick={onClose}>×</button></div>
     <button type="button" className="movementPickerTrigger" aria-label={selectedMovement ? `Выбрать упражнение. Сейчас: ${selectedMovement.name}` : 'Выбрать упражнение'} aria-expanded={pickerOpen} aria-controls={`movement-picker-${exercise?.id ?? 'new'}`} onClick={() => setPickerOpen(!pickerOpen)}>
-      <span><strong>{selectedMovement?.name ?? 'Выберите упражнение'}</strong>{selectedMovement && <small>{selectedMovement.primary_group}{selectedMovement.secondary_groups.length ? ` · дополнительно: ${selectedMovement.secondary_groups.join(', ')}` : ''}</small>}</span><IconChevronDown size={19} stroke={1.8} aria-hidden="true" />
+      <span><strong>{selectedMovement?.name ?? 'Выберите упражнение'}</strong>{selectedMovement && <small>{selectedMovement.kind === 'strength' ? selectedMovement.primary_group : movementKinds[selectedMovement.kind]}{selectedMovement.secondary_groups.length ? ` · дополнительно: ${selectedMovement.secondary_groups.join(', ')}` : ''}</small>}</span><IconChevronDown size={19} stroke={1.8} aria-hidden="true" />
     </button>
     {pickerOpen && <div className="movementPickerPanel" id={`movement-picker-${exercise?.id ?? 'new'}`}>
-      <div className="catalogFilters"><ChoiceDropdown label="Основная мышца" value={muscleFilter} options={[{ value: 'all', label: 'Все мышцы' }, ...muscleOptions.map(group => ({ value: group, label: group }))]} onChange={setMuscleFilter} /><label className="field"><span>Поиск по названию</span><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Например, шта или мах" /></label></div>
+      <div className="catalogFilters"><ChoiceDropdown label="Мышца или тип" value={muscleFilter} options={[{ value: 'all', label: 'Все упражнения' }, ...muscleOptions.map(group => ({ value: group, label: group })), ...timedOptions]} onChange={setMuscleFilter} /><label className="field"><span>Поиск по названию</span><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Например, шта или мах" /></label></div>
       {query.length > 0 && query.length < 3 && <p className="fieldHelp">Введите не меньше трёх букв для поиска.</p>}
-      <div className="movementChoiceList" role="listbox" aria-label="Выберите упражнение">{filteredMovements.length ? filteredMovements.map(item => <button type="button" role="option" key={item.id} className={form.movement_id === item.id ? 'selected' : ''} aria-selected={form.movement_id === item.id} onClick={() => { setForm({ ...form, movement_id: item.id, name: item.name }); setPickerOpen(false) }}><strong>{item.name}</strong><small>{item.primary_group}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></button>) : <p className="fieldHelp">Упражнения не найдены. Добавьте движение в «Списке упражнений».</p>}</div>
+      <div className="movementChoiceList" role="listbox" aria-label="Выберите упражнение">{filteredMovements.length ? filteredMovements.map(item => <button type="button" role="option" key={item.id} className={form.movement_id === item.id ? 'selected' : ''} aria-selected={form.movement_id === item.id} onClick={() => { setForm({ ...form, movement_id: item.id, name: item.name, duration_minutes: item.kind === 'strength' ? null : form.duration_minutes ?? 20 }); setPickerOpen(false) }}><strong>{item.name}</strong><small>{item.kind === 'strength' ? item.primary_group : movementKinds[item.kind]}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></button>) : <p className="fieldHelp">Упражнения не найдены. Добавьте движение в «Списке упражнений».</p>}</div>
     </div>}
-    <div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}{numberField('position', 'Порядок')}</div>
-    <div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}{numberField('rir_target', 'Целевой ПДО', '0.5')}</div>
+    {selectedMovement?.kind !== 'strength' && selectedMovement ? <div className="fieldGrid">{numberField('duration_minutes', 'План, минут')}{numberField('position', 'Порядок')}</div> : <><div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}{numberField('position', 'Порядок')}</div><div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}{numberField('rir_target', 'Целевой ПДО', '0.5')}</div></>}
     <button className="primaryButton" type="submit" disabled={!form.movement_id}>Сохранить упражнение</button>
   </form>
 }
@@ -88,7 +87,7 @@ export function ProgramView({ templates, run }: {
 
   const saveTemplate = async (event: FormEvent) => {
     event.preventDefault()
-    if (!selectedGroups.length) { setGroupError('Выберите хотя бы одну мышечную группу.'); return }
+    if (!selectedGroups.length) { setGroupError('Выберите хотя бы один раздел.'); return }
     await run(async () => {
       const data = { name, muscle_group: selectedGroups.join(', '), weekday, send_time: sendTime }
       if (selected && editingTemplate) await api.updateTemplate(selected.id, data)
@@ -113,14 +112,14 @@ export function ProgramView({ templates, run }: {
     {showForm ? <form className="editorPanel" onSubmit={saveTemplate}>
       <div className="editorTitle"><h2>{editingTemplate ? 'Изменить тренировку' : 'Новая тренировка'}</h2>{editingTemplate && <button type="button" onClick={() => setEditingTemplate(false)}>×</button>}</div>
       <label className="field"><span>Название тренировки</span><input required maxLength={120} value={name} placeholder="Например, Грудь и трицепс" onChange={event => setName(event.target.value)} /></label>
-      <div className="groupField"><span className="filterLabel">Мышечные группы</span>{selectedGroups.length > 0 && <div className="groupChips">{selectedGroups.map(group => <button type="button" key={group} onClick={() => setSelectedGroups(selectedGroups.filter(item => item !== group))} aria-label={`Убрать группу ${group}`}>{group}<IconX size={15} stroke={1.8} aria-hidden="true" /></button>)}</div>}{suggestedGroups.some(group => !selectedGroups.includes(group)) ? <ChoiceDropdown label="Мышечные группы" hideLabel value="" options={suggestedGroups.filter(group => !selectedGroups.includes(group)).map(group => ({ value: group, label: group }))} placeholder="+ Добавить группу" onChange={group => { setSelectedGroups([...selectedGroups, group]); setGroupError('') }} /> : <div className="allGroupsSelected">Все группы выбраны</div>}{groupError && <small className="fieldError" role="alert">{groupError}</small>}</div>
+      <div className="groupField"><span className="filterLabel">Разделы тренировки</span>{selectedGroups.length > 0 && <div className="groupChips">{selectedGroups.map(group => <button type="button" key={group} onClick={() => setSelectedGroups(selectedGroups.filter(item => item !== group))} aria-label={`Убрать раздел ${group}`}>{group}<IconX size={15} stroke={1.8} aria-hidden="true" /></button>)}</div>}{suggestedGroups.some(group => !selectedGroups.includes(group)) ? <ChoiceDropdown label="Разделы тренировки" hideLabel value="" options={suggestedGroups.filter(group => !selectedGroups.includes(group)).map(group => ({ value: group, label: group }))} placeholder="+ Добавить раздел" onChange={group => { setSelectedGroups([...selectedGroups, group]); setGroupError('') }} /> : <div className="allGroupsSelected">Все разделы выбраны</div>}{groupError && <small className="fieldError" role="alert">{groupError}</small>}</div>
       <div className="fieldGrid scheduleFields"><ChoiceDropdown label="День недели" value={String(weekday)} options={weekdays.map((day, index) => ({ value: String(index), label: day }))} onChange={value => setWeekday(Number(value))} /><TimePicker label="Начало тренировки" value={sendTime} onChange={setSendTime} /></div>
       <button className="primaryButton" type="submit">Сохранить тренировку</button>
     </form> : selected && <section className="programSessionBlock" aria-label={`Настройка тренировки ${selected.name}`}>
       <div className="programCard"><div className="programCardTop"><span>{weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
       <div className="sectionHead"><h2>Упражнения</h2><span>{selected.exercises.length}</span></div>
       {selected.exercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; return <div className="programExerciseItem" key={exercise.id}>
-        <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · {exercise.sets_count} подхода · {exercise.rep_min}–{exercise.rep_max} · {formatWeight(exercise.medium_weight)} кг</small></div><button onClick={() => setExerciseEditor(expanded ? null : exercise.id)} aria-label={`${expanded ? 'Свернуть настройки' : 'Изменить'} ${exercise.name}`} aria-expanded={expanded} aria-controls={`exercise-editor-${exercise.id}`}>✎</button><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
+        <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement && movement.kind !== 'strength' ? `${movementKinds[movement.kind]} · ${exercise.duration_minutes ?? 0} мин` : `${movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · ${exercise.sets_count} подхода · ${exercise.rep_min}–${exercise.rep_max} · ${formatWeight(exercise.medium_weight)} кг`}</small></div><button onClick={() => setExerciseEditor(expanded ? null : exercise.id)} aria-label={`${expanded ? 'Свернуть настройки' : 'Изменить'} ${exercise.name}`} aria-expanded={expanded} aria-controls={`exercise-editor-${exercise.id}`}>✎</button><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
         {expanded && <div className="programInlineEditor" id={`exercise-editor-${exercise.id}`}><ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} exercise={exercise} onClose={() => setExerciseEditor(null)} run={run} /></div>}
       </div> })}
       {exerciseEditor === 'new' && <ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} onClose={() => setExerciseEditor(null)} run={run} />}

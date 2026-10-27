@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
@@ -16,10 +16,10 @@ from .bot import dispatcher, reminder_loop
 from .config import get_settings
 from .db import Base, engine, get_db
 from .migrations import migrate
-from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WorkoutSession, WorkoutTemplate, utcnow
+from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, utcnow
 from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS
-from .planning import get_or_create_session, movement_for, planned_counts, prescription, resolve_week
-from .schemas import ExerciseIn, MovementIn, MuscleTargetIn, OverrideIn, RecoveryIn, RescheduleIn, ResultIn, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
+from .planning import get_or_create_session, monday, movement_for, planned_counts, prescription, resolve_week
+from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, RescheduleIn, ResultIn, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
 
@@ -180,7 +180,7 @@ def create_movement(data: MovementIn, user: User = Depends(current_user), db: Se
         for old in db.scalars(select(Movement).where(Movement.user_id == user.telegram_id,
                                                     Movement.primary_group == data.primary_group)):
             old.is_anchor = False
-    item = Movement(user_id=user.telegram_id, name=data.name, primary_group=data.primary_group,
+    item = Movement(user_id=user.telegram_id, name=data.name, kind=data.kind, primary_group=data.primary_group,
                     secondary_groups=", ".join(data.secondary_groups), is_anchor=data.is_anchor)
     db.add(item)
     db.commit()
@@ -196,7 +196,7 @@ def update_movement(movement_id: str, data: MovementIn, user: User = Depends(cur
                                                     Movement.primary_group == data.primary_group,
                                                     Movement.id != movement_id)):
             old.is_anchor = False
-    item.name, item.primary_group = data.name, data.primary_group
+    item.name, item.kind, item.primary_group = data.name, data.kind, data.primary_group
     item.secondary_groups, item.is_anchor = ", ".join(data.secondary_groups), data.is_anchor
     db.commit()
     return movement_dict(item)
@@ -242,6 +242,8 @@ def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(cur
     if not data.movement_id:
         raise HTTPException(422, "Choose a movement and its muscle groups")
     movement = owned_movement(db, user, data.movement_id)
+    if movement.kind != "strength" and data.duration_minutes is None:
+        raise HTTPException(422, "Укажите длительность в минутах")
     data.name = movement.name
     item = Exercise(template_id=template_id, **data.model_dump())
     db.add(item)
@@ -253,9 +255,10 @@ def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(cur
 @app.put("/api/exercises/{exercise_id}")
 def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     item = owned_exercise(db, user, exercise_id)
-    if data.movement_id:
-        movement = owned_movement(db, user, data.movement_id)
-        data.name = movement.name
+    movement = owned_movement(db, user, data.movement_id or item.movement_id)
+    if movement.kind != "strength" and data.duration_minutes is None:
+        raise HTTPException(422, "Укажите длительность в минутах")
+    data.name = movement.name
     for key, value in data.model_dump().items():
         setattr(item, key, value)
     db.commit()
@@ -273,6 +276,10 @@ def delete_exercise(exercise_id: str, user: User = Depends(current_user), db: Se
 @app.get("/api/sessions/today")
 def today_sessions(user: User = Depends(current_user), db: Session = Depends(get_db)):
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
+    if db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
+                                           WeekOverride.week_start == monday(local_date),
+                                           WeekOverride.kind == "vacation")):
+        return []
     due = db.scalars(select(WorkoutTemplate).where(
         WorkoutTemplate.user_id == user.telegram_id,
         WorkoutTemplate.active.is_(True),
@@ -293,6 +300,8 @@ def start_session(template_id: str, user: User = Depends(current_user), db: Sess
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
     session = get_or_create_session(db, template, local_date)
     if not session:
+        if resolve_week(db, user.telegram_id, local_date).phase_type == "vacation":
+            raise HTTPException(409, "На этой неделе отпуск — тренировки приостановлены")
         raise HTTPException(400, "Add exercises first")
     if session.status == "completed":
         raise HTTPException(409, "This workout is already completed today")
@@ -317,6 +326,8 @@ def session_detail(session_id: str, user: User = Depends(current_user), db: Sess
 @app.patch("/api/session-exercises/{item_id}/target")
 def override_target(item_id: str, data: OverrideIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     session, item = owned_session_exercise(db, user, item_id)
+    if item.kind != "strength":
+        raise HTTPException(409, "Цель упражнения на время задаётся в программе")
     if session.status == "completed" or item.results:
         raise HTTPException(409, "Target can only change before recording sets")
     item.target_weight = data.target_weight
@@ -330,7 +341,7 @@ def skip_exercise(item_id: str, data: SkipIn, user: User = Depends(current_user)
     session, item = owned_session_exercise(db, user, item_id)
     if session.status == "completed":
         raise HTTPException(409, "Session is completed")
-    if data.skipped and item.results:
+    if data.skipped and (item.results or item.actual_duration_minutes):
         raise HTTPException(409, "Delete recorded sets before skipping")
     item.skipped = data.skipped
     db.commit()
@@ -340,6 +351,8 @@ def skip_exercise(item_id: str, data: SkipIn, user: User = Depends(current_user)
 @app.patch("/api/session-exercises/{item_id}/sets-count")
 def change_sets_count(item_id: str, data: SetsCountIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     session, item = owned_session_exercise(db, user, item_id)
+    if item.kind != "strength":
+        raise HTTPException(409, "У упражнения на время нет подходов")
     if session.status == "completed" or any(r.is_working and r.set_index > data.sets_count for r in item.results):
         raise HTTPException(409, "Cannot remove a recorded set")
     item.sets_count = data.sets_count
@@ -350,6 +363,8 @@ def change_sets_count(item_id: str, data: SetsCountIn, user: User = Depends(curr
 @app.put("/api/session-exercises/{item_id}/sets/{set_index}")
 def save_set(item_id: str, set_index: int, data: ResultIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     session, item = owned_session_exercise(db, user, item_id)
+    if item.kind != "strength":
+        raise HTTPException(409, "У упражнения на время нет подходов")
     if session.status == "completed" or item.skipped:
         raise HTTPException(409, "Exercise cannot be edited")
     if (data.is_working and (set_index < 1 or set_index > item.sets_count)) or (not data.is_working and (set_index > 0 or set_index < -5)):
@@ -366,6 +381,27 @@ def save_set(item_id: str, set_index: int, data: ResultIn, user: User = Depends(
     result.rir_target = item.target_rir
     result.is_working = data.is_working
     session.status = "in_progress"
+    db.commit()
+    return session_detail(session.id, user, db)
+
+
+@app.put("/api/session-exercises/{item_id}/duration")
+def save_duration(item_id: str, data: DurationIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    session, item = owned_session_exercise(db, user, item_id)
+    if item.kind == "strength" or session.status == "completed" or item.skipped:
+        raise HTTPException(409, "Длительность нельзя изменить")
+    item.actual_duration_minutes = data.minutes
+    session.status = "in_progress"
+    db.commit()
+    return session_detail(session.id, user, db)
+
+
+@app.delete("/api/session-exercises/{item_id}/duration")
+def clear_duration(item_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    session, item = owned_session_exercise(db, user, item_id)
+    if item.kind == "strength" or session.status == "completed":
+        raise HTTPException(409, "Длительность нельзя изменить")
+    item.actual_duration_minutes = None
     db.commit()
     return session_detail(session.id, user, db)
 
@@ -391,13 +427,16 @@ def complete_session(session_id: str, user: User = Depends(current_user), db: Se
         return session_detail(session_id, user, db)
     if not session.exercises or all(item.skipped for item in session.exercises):
         raise HTTPException(400, "Record at least one exercise")
-    if any(not item.skipped and len([r for r in item.results if r.is_working]) != item.sets_count for item in session.exercises):
+    if any(not item.skipped and (not item.actual_duration_minutes if item.kind != "strength"
+               else len([r for r in item.results if r.is_working]) != item.sets_count) for item in session.exercises):
         raise HTTPException(400, "Record all sets or skip the exercise")
     session.status = "completed"
     session.completed_at = utcnow()
     session.actual_date = datetime.now(ZoneInfo(user.timezone)).date()
     if session.phase_type is not None:
         actual_week = resolve_week(db, user.telegram_id, session.actual_date)
+        if actual_week.phase_type == "vacation":
+            raise HTTPException(409, "Во время отпуска завершить тренировку нельзя")
         session.week_id, session.phase_type = actual_week.id, actual_week.phase_type
     template = db.get(WorkoutTemplate, session.template_id)
     db.commit()
@@ -419,21 +458,81 @@ def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current
                                               WorkoutSession.scheduled_date == new_date)):
         raise HTTPException(409, "Workout already exists on that date")
     week = resolve_week(db, user.telegram_id, new_date)
+    if week.phase_type == "vacation":
+        raise HTTPException(409, "На неделю отпуска нельзя перенести тренировку")
     session.scheduled_date, session.week_id, session.phase_type = new_date, week.id, week.phase_type
     counts = planned_counts(db, user.telegram_id, week)
     prior = db.scalar(select(TrainingWeek).where(
-        TrainingWeek.user_id == user.telegram_id, TrainingWeek.week_start < week.week_start
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.week_start < week.week_start,
+        TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
     reentry = bool(prior and prior.phase_type == "deload" and not prior.missed_deload)
     for item in session.exercises:
         exercise = db.get(Exercise, item.exercise_id)
         movement = movement_for(db, exercise, user.telegram_id)
-        weight, reps, action = prescription(db, exercise, week, reentry)
-        item.sets_count, item.target_weight, item.target_reps = counts[exercise.id], weight, reps
-        item.target_rir, item.action_label = (2.5 if reentry else week.target_rir), action
+        timed = movement.kind != "strength"
+        weight, reps, action = (0, 0, "Цель по времени") if timed else prescription(db, exercise, week, reentry)
+        item.kind, item.target_duration_minutes = movement.kind, exercise.duration_minutes if timed else None
+        item.sets_count, item.target_weight, item.target_reps = 0 if timed else counts[exercise.id], weight, reps
+        item.target_rir, item.action_label = None if timed else (2.5 if reentry else week.target_rir), action
         item.primary_group, item.secondary_groups = movement.primary_group, movement.secondary_groups
     db.commit()
     return session_dict(session, db.get(WorkoutTemplate, session.template_id))
+
+
+def next_week_start(user: User) -> date:
+    today = datetime.now(ZoneInfo(user.timezone)).date()
+    return monday(today) + timedelta(days=7)
+
+
+@app.get("/api/next-week")
+def next_week(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    start = next_week_start(user)
+    override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
+                                                    WeekOverride.week_start == start))
+    return {"week_start": start.isoformat(), "kind": override.kind if override else None}
+
+
+def editable_next_week(db: Session, user: User) -> tuple[date, TrainingWeek | None]:
+    start = next_week_start(user)
+    week = db.scalar(select(TrainingWeek).where(TrainingWeek.user_id == user.telegram_id,
+                                                TrainingWeek.week_start == start))
+    if db.scalar(select(WorkoutSession).where(
+        WorkoutSession.user_id == user.telegram_id,
+        WorkoutSession.scheduled_date >= start)):
+        raise HTTPException(409, "После начала выбранной недели уже создана тренировка")
+    return start, week
+
+
+@app.put("/api/next-week")
+def set_next_week(data: NextWeekIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    start, week = editable_next_week(db, user)
+    override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
+                                                    WeekOverride.week_start == start))
+    if override is None:
+        override = WeekOverride(user_id=user.telegram_id, week_start=start, kind=data.kind)
+        db.add(override)
+    else:
+        override.kind = data.kind
+    for stale in db.scalars(select(TrainingWeek).where(TrainingWeek.user_id == user.telegram_id,
+                                                       TrainingWeek.week_start >= start)):
+        db.delete(stale)
+    db.commit()
+    return {"week_start": start.isoformat(), "kind": data.kind}
+
+
+@app.delete("/api/next-week")
+def clear_next_week(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    start, week = editable_next_week(db, user)
+    override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
+                                                    WeekOverride.week_start == start))
+    if override:
+        db.delete(override)
+    for stale in db.scalars(select(TrainingWeek).where(TrainingWeek.user_id == user.telegram_id,
+                                                       TrainingWeek.week_start >= start)):
+        db.delete(stale)
+    db.commit()
+    return {"week_start": start.isoformat(), "kind": None}
 
 
 @app.post("/api/weeks/{week_start}/manual-deload")

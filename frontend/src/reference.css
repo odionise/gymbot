@@ -237,6 +237,24 @@ h2 { font-weight: 650; }
 .homeGuide p:last-child { margin-bottom: 0; }
 .homeGuide ol { margin: 0 0 11px; padding-left: 20px; }
 .homeGuide li + li { margin-top: 5px; }
+.todayHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.todayHeading h1 { margin: 0; }
+.nextWeekControl { position: relative; }
+.nextWeekTrigger { border: 1px solid #d9dce1; border-radius: 18px; background: #fff; padding: 9px 12px; font-size: .75rem; font-weight: 700; color: var(--ink); cursor: pointer; }
+.nextWeekTrigger span { margin-left: 4px; }
+.nextWeekMenu { position: absolute; z-index: 12; right: 0; top: calc(100% + 8px); width: min(320px, 88vw); padding: 14px; border: 1px solid #e0e2e6; border-radius: 18px; background: #fff; box-shadow: 0 12px 34px #2223; }
+.nextWeekMenu strong { display: block; margin-bottom: 5px; }
+.nextWeekMenu p { margin: 0 0 10px; font-size: .78rem; color: #606873; line-height: 1.4; }
+.nextWeekMenu button { display: block; width: 100%; margin-top: 6px; padding: 10px 11px; border: 1px solid #e2e5e9; border-radius: 11px; background: #fff; text-align: left; cursor: pointer; font-weight: 700; }
+.nextWeekMenu button.selected { background: #eaf4ef; border-color: #75b697; }
+.nextWeekMenu button small { display: block; margin-top: 2px; font-weight: 400; color: #6c747d; }
+.nextWeekMenu button.clearWeek { color: #9c3232; }
+.homeGuide details { border-top: 1px solid #e6e9ed; padding: 11px 0; }
+.homeGuide details:last-child { padding-bottom: 0; }
+.homeGuide summary { cursor: pointer; font-size: .87rem; font-weight: 700; line-height: 1.4; }
+.homeGuide details p { margin: 9px 0 0; }
+.timedInputRow { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
+.timedInputRow .setField { flex: 1 1 150px; max-width: 220px; }
 .setRow .setField { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: stretch; gap: 3px; }
 .setRow .setField > span { font-size: .69rem; white-space: nowrap; }
 .setValueControl { display: grid; grid-template-columns: minmax(38px, .8fr) minmax(0, 1fr) minmax(38px, .8fr); align-items: stretch; min-width: 0; overflow: hidden; border: 1px solid #e1e3e6; border-radius: 11px; background: #f5f6f7; }

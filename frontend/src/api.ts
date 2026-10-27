@@ -1,4 +1,4 @@
-import type { ExerciseInput, Me, Movement, MuscleTarget, Progress, Template, WorkoutSession } from './types'
+import type { ExerciseInput, Me, Movement, MuscleTarget, NextWeek, Progress, Template, WorkoutSession } from './types'
 
 declare global {
   interface Window {
@@ -58,6 +58,8 @@ export const api = {
     request<WorkoutSession>(`/session-exercises/${id}/target`, { method: 'PATCH', body: json({ target_weight, target_reps }) }),
   saveSet: (id: string, index: number, weight: number, reps: number, rir_reported: number | null, is_working = true) =>
     request<WorkoutSession>(`/session-exercises/${id}/sets/${index}`, { method: 'PUT', body: json({ weight, reps, rir_reported, is_working }) }),
+  saveDuration: (id: string, minutes: number) => request<WorkoutSession>(`/session-exercises/${id}/duration`, { method: 'PUT', body: json({ minutes }) }),
+  clearDuration: (id: string) => request<WorkoutSession>(`/session-exercises/${id}/duration`, { method: 'DELETE' }),
   deleteSet: (id: string, index: number) => request<WorkoutSession>(`/session-exercises/${id}/sets/${index}`, { method: 'DELETE' }),
   skip: (id: string, skipped: boolean) =>
     request<WorkoutSession>(`/session-exercises/${id}/skip`, { method: 'PATCH', body: json({ skipped }) }),
@@ -67,4 +69,7 @@ export const api = {
   manualDeload: (week_start: string) => request(`/weeks/${week_start}/manual-deload`, { method: 'POST' }),
   setRecovery: (week_start: string, feeling_beat_up: boolean) => request(`/weeks/${week_start}/recovery`, { method: 'PATCH', body: json({ feeling_beat_up }) }),
   progress: () => request<Progress>('/progress'),
+  nextWeek: () => request<NextWeek>('/next-week'),
+  setNextWeek: (kind: 'deload' | 'vacation') => request<NextWeek>('/next-week', { method: 'PUT', body: json({ kind }) }),
+  clearNextWeek: () => request<NextWeek>('/next-week', { method: 'DELETE' }),
 }

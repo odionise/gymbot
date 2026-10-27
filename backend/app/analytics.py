@@ -25,7 +25,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
         day = session.actual_date or session.scheduled_date
         start = monday(day)
         for exercise in session.exercises:
-            if exercise.skipped or not exercise.results:
+            if exercise.kind != "strength" or exercise.skipped or not exercise.results:
                 continue
             results = [r for r in exercise.results if r.is_working]
             if not results:

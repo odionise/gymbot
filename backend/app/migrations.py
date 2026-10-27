@@ -53,3 +53,19 @@ def migrate(engine):
             if "feeling_beat_up" not in existing:
                 connection.execute(text("ALTER TABLE training_weeks ADD COLUMN feeling_beat_up BOOLEAN NOT NULL DEFAULT FALSE"))
             connection.execute(text("INSERT INTO schema_versions (version) VALUES (3)"))
+        if version < 4:
+            additions = {
+                "movements": {"kind": "VARCHAR(16) NOT NULL DEFAULT 'strength'"},
+                "exercises": {"duration_minutes": "INTEGER"},
+                "session_exercises": {
+                    "kind": "VARCHAR(16) NOT NULL DEFAULT 'strength'",
+                    "target_duration_minutes": "INTEGER",
+                    "actual_duration_minutes": "INTEGER",
+                },
+            }
+            for table, columns in additions.items():
+                existing = {column["name"] for column in inspector.get_columns(table)}
+                for name, specification in columns.items():
+                    if name not in existing:
+                        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {specification}"))
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (4)"))

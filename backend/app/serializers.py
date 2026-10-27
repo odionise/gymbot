@@ -4,7 +4,7 @@ from .planning import PHASES, next_set_suggestion
 
 
 def movement_dict(item: Movement) -> dict:
-    return {"id": item.id, "name": item.name, "primary_group": item.primary_group,
+    return {"id": item.id, "name": item.name, "kind": item.kind, "primary_group": item.primary_group,
             "secondary_groups": split_details(item.secondary_groups), "is_anchor": item.is_anchor}
 
 
@@ -20,6 +20,7 @@ def exercise_dict(item: Exercise) -> dict:
         "movement_id": item.movement_id, "rep_min": item.rep_min or item.medium_min,
         "rep_max": item.rep_max or item.medium_max,
         "rir_target": float(item.rir_target or 2),
+        "duration_minutes": item.duration_minutes,
     }
 
 
@@ -35,6 +36,8 @@ def session_exercise_dict(item: SessionExercise) -> dict:
     step = float(item.exercise.weight_step)
     return {
         "id": item.id, "exercise_id": item.exercise_id, "name": item.name,
+        "kind": item.kind, "target_duration_minutes": item.target_duration_minutes,
+        "actual_duration_minutes": item.actual_duration_minutes,
         "position": item.position, "sets_count": item.sets_count,
         "weight_step": step,
         "target_weight": float(item.target_weight), "target_reps": item.target_reps,

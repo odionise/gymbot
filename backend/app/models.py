@@ -59,6 +59,7 @@ class Exercise(Base):
     rep_min: Mapped[int | None] = mapped_column(Integer)
     rep_max: Mapped[int | None] = mapped_column(Integer)
     rir_target: Mapped[float | None] = mapped_column(Numeric(3, 1))
+    duration_minutes: Mapped[int | None] = mapped_column(Integer)
     template: Mapped[WorkoutTemplate] = relationship(back_populates="exercises")
     movement: Mapped["Movement | None"] = relationship()
 
@@ -68,6 +69,7 @@ class Movement(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(16), default="strength")
     primary_group: Mapped[str] = mapped_column(String(80))
     secondary_groups: Mapped[str] = mapped_column(String(240), default="")
     is_anchor: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -111,6 +113,15 @@ class TrainingWeek(Base):
     targets_json: Mapped[str] = mapped_column(String(4000), default="{}")
 
 
+class WeekOverride(Base):
+    __tablename__ = "week_overrides"
+    __table_args__ = (UniqueConstraint("user_id", "week_start"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"), index=True)
+    week_start: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(16))
+
+
 class WorkoutSession(Base):
     __tablename__ = "workout_sessions"
     __table_args__ = (UniqueConstraint("template_id", "scheduled_date"),)
@@ -150,6 +161,9 @@ class SessionExercise(Base):
     target_rir: Mapped[float | None] = mapped_column(Numeric(3, 1))
     action_label: Mapped[str | None] = mapped_column(String(180))
     is_anchor: Mapped[bool] = mapped_column(Boolean, default=False)
+    kind: Mapped[str] = mapped_column(String(16), default="strength")
+    target_duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    actual_duration_minutes: Mapped[int | None] = mapped_column(Integer)
     session: Mapped[WorkoutSession] = relationship(back_populates="exercises")
     exercise: Mapped[Exercise] = relationship()
     results: Mapped[list["SetResult"]] = relationship(back_populates="session_exercise", order_by="SetResult.set_index", cascade="all, delete-orphan")

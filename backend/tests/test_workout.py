@@ -8,11 +8,65 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.analytics import progress_for_user
 from app.bot import format_plan
 from app.db import make_engine
-from app.main import change_sets_count, complete_session, create_exercise, create_movement, create_template, manual_deload, reschedule, save_set, update_muscle_target, update_recovery
+from app.main import change_sets_count, clear_next_week, complete_session, create_exercise, create_movement, create_template, manual_deload, reschedule, save_duration, save_set, set_next_week, update_muscle_target, update_recovery
 from app.migrations import migrate
 from app.models import Exercise, Movement, SessionExercise, SetResult, TrainingWeek, User, WorkoutSession, WorkoutTemplate, utcnow
-from app.planning import get_or_create_session, next_set_suggestion
-from app.schemas import ExerciseIn, MovementIn, MuscleTargetIn, RecoveryIn, RescheduleIn, ResultIn, SetsCountIn, TemplateIn
+from app.planning import get_or_create_session, next_set_suggestion, resolve_week
+from app.schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, RecoveryIn, RescheduleIn, ResultIn, SetsCountIn, TemplateIn
+
+
+def test_timed_exercise_recording_excludes_strength_progress(database):
+    with database() as db:
+        user = User(telegram_id=7)
+        db.add(user)
+        assert TemplateIn(name='Восстановление', muscle_group='Кардио', weekday=0, send_time='09:00').muscle_group == 'Кардио'
+        template = WorkoutTemplate(user_id=7, name='Восстановление', muscle_group='Кардио', weekday=0)
+        db.add(template)
+        db.flush()
+        movement = create_movement(MovementIn(name='Ходьба', kind='cardio'), user, db)
+        exercise = create_exercise(template.id, ExerciseIn(name='Ходьба', movement_id=movement['id'],
+                                                            duration_minutes=30), user, db)
+        assert exercise['duration_minutes'] == 30
+        session = get_or_create_session(db, template, date(2026, 10, 26))
+        item = session.exercises[0]
+        assert item.kind == 'cardio' and item.sets_count == 0
+        assert '30 мин' in format_plan(session, date(2026, 10, 26))
+        saved = save_duration(item.id, DurationIn(minutes=35), user, db)
+        assert saved['exercises'][0]['actual_duration_minutes'] == 35
+        finished = complete_session(session.id, user, db)
+        assert finished['status'] == 'completed'
+        assert progress_for_user(db, 7)['exercises'] == []
+        assert progress_for_user(db, 7)['weeks'] == []
+
+
+def test_next_week_vacation_pauses_cycle_and_can_be_cancelled(database):
+    with database() as db:
+        template, _ = make_program(db)
+        user = db.get(User, 1)
+        first = get_or_create_session(db, template, date(2026, 10, 26))
+        finish(db, first)
+        override = set_next_week(NextWeekIn(kind='vacation'), user, db)
+        start = date.fromisoformat(override['week_start'])
+        assert get_or_create_session(db, template, start) is None
+        assert resolve_week(db, 1, start).phase_type == 'vacation'
+        following = get_or_create_session(db, template, start + timedelta(weeks=1))
+        assert following.week.week_number == 2
+        # A future week with a created session is protected from retroactive edits.
+        with pytest.raises(HTTPException):
+            clear_next_week(user, db)
+
+
+def test_next_week_choice_can_be_changed_before_sessions(database):
+    with database() as db:
+        _, _ = make_program(db)
+        user = db.get(User, 1)
+        choice = set_next_week(NextWeekIn(kind='vacation'), user, db)
+        start = date.fromisoformat(choice['week_start'])
+        resolve_week(db, 1, start)
+        assert set_next_week(NextWeekIn(kind='deload'), user, db)['kind'] == 'deload'
+        assert resolve_week(db, 1, start).phase_type == 'deload'
+        assert clear_next_week(user, db)['kind'] is None
+        assert resolve_week(db, 1, start).phase_type == 'accumulation'
 
 
 @pytest.fixture

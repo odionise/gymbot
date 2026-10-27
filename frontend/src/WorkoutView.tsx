@@ -86,13 +86,35 @@ function ExerciseBlock({ item, onChange, onError }: {
   </section>
 }
 
+function TimedExerciseBlock({ item, onChange, onError }: {
+  item: SessionExercise; onChange: (value: WorkoutSession) => void; onError: (value: string) => void
+}) {
+  const [minutes, setMinutes] = useState(String(item.actual_duration_minutes ?? item.target_duration_minutes ?? 20))
+  const [busy, setBusy] = useState(false)
+  useEffect(() => setMinutes(String(item.actual_duration_minutes ?? item.target_duration_minutes ?? 20)), [item.actual_duration_minutes, item.target_duration_minutes])
+  const save = async () => {
+    setBusy(true)
+    try { onChange(await api.saveDuration(item.id, Number(minutes))) } catch (err) { onError((err as Error).message) }
+    finally { setBusy(false) }
+  }
+  const skip = async () => {
+    try { onChange(await api.skip(item.id, !item.skipped)) } catch (err) { onError((err as Error).message) }
+  }
+  return <section className={`exerciseCard timedExercise ${item.skipped ? 'skipped' : ''}`}>
+    <div className="exerciseHead"><div><span className="cardIndex">Упражнение {item.position + 1}</span><h2>{item.name}</h2></div><span className="exerciseCheck">{item.actual_duration_minutes ? '✓' : '—'}</span></div>
+    <p className="hint">План: {item.target_duration_minutes} мин. Запишите фактическое время.</p>
+    {!item.skipped && <div className="timedInputRow"><div className="setField"><span>Минуты</span><div className="setValueControl"><button type="button" className="setStepButton" onClick={() => setMinutes(String(Math.max(1, Number(minutes) - 1)))} disabled={busy || Number(minutes) <= 1}>−</button><input aria-label="Фактическая длительность, минут" type="number" min="1" max="600" inputMode="numeric" value={minutes} onChange={event => setMinutes(event.target.value)} /><button type="button" className="setStepButton" onClick={() => setMinutes(String(Math.min(600, Number(minutes) + 1)))} disabled={busy || Number(minutes) >= 600}>+</button></div></div><button className="outlineButton" onClick={save} disabled={busy || Number(minutes) < 1 || Number(minutes) > 600}>{item.actual_duration_minutes ? 'Обновить время' : 'Сохранить время'}</button>{item.actual_duration_minutes && <button className="textButton" disabled={busy} onClick={async () => { try { onChange(await api.clearDuration(item.id)) } catch (err) { onError((err as Error).message) } }}>Удалить запись</button>}</div>}
+    <button className="skipButton" onClick={skip} disabled={Boolean(item.actual_duration_minutes) && !item.skipped}>{item.skipped ? 'Вернуть упражнение' : 'Пропустить упражнение'}</button>
+  </section>
+}
+
 export function WorkoutView({ session, onChange, onBack, onComplete, onError }: {
   session: WorkoutSession; onChange: (value: WorkoutSession) => void; onBack: () => void; onComplete: () => void; onError: (value: string) => void
 }) {
   const [busy, setBusy] = useState(false)
   const [newDate, setNewDate] = useState(session.scheduled_date)
-  const saved = session.exercises.reduce((count, item) => count + item.results.filter(result => result.is_working).length, 0)
-  const total = session.exercises.reduce((count, item) => count + (item.skipped ? 0 : item.sets_count), 0)
+  const saved = session.exercises.reduce((count, item) => count + (item.kind === 'strength' ? item.results.filter(result => result.is_working).length : item.actual_duration_minutes && !item.skipped ? 1 : 0), 0)
+  const total = session.exercises.reduce((count, item) => count + (item.skipped ? 0 : item.kind === 'strength' ? item.sets_count : 1), 0)
   const dateLabel = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${session.scheduled_date}T12:00:00Z`))
   const complete = async () => {
     setBusy(true)
@@ -106,9 +128,9 @@ export function WorkoutView({ session, onChange, onBack, onComplete, onError }: 
     {session.deload_reason && <p className="hint">Легкая неделя: {session.deload_reason === 'scheduled' ? 'по календарю' : session.deload_reason === 'auto' ? 'по сигналам восстановления' : 'по вашему выбору'}.</p>}
     {session.week_start && <button className="outlineButton" onClick={async () => { try { await api.setRecovery(session.week_start!, !session.feeling_beat_up); onChange({ ...session, feeling_beat_up: !session.feeling_beat_up }) } catch (err) { onError((err as Error).message) } }}>{session.feeling_beat_up ? 'Отмечено: тяжело / болит' : 'Отметить: тяжело / болит'}</button>}
     {session.status === 'planned' && <div className="fieldGrid"><label className="field"><span>Перенести на дату</span><input type="date" value={newDate} onChange={event => setNewDate(event.target.value)} /></label><button className="outlineButton" onClick={async () => { try { onChange(await api.reschedule(session.id, newDate)) } catch (err) { onError((err as Error).message) } }}>Перенести</button></div>}
-    <div className="completionMeter"><div className="meterTop"><span>Записано подходов</span><strong aria-live="polite">{saved}<em> / {total}</em></strong></div><div className="meterTrack"><div style={{ width: `${total ? saved / total * 100 : 0}%` }} /></div></div>
-    {session.exercises.map(item => <ExerciseBlock key={item.id} item={item} onChange={onChange} onError={onError} />)}
+    <div className="completionMeter"><div className="meterTop"><span>Записано результатов</span><strong aria-live="polite">{saved}<em> / {total}</em></strong></div><div className="meterTrack"><div style={{ width: `${total ? saved / total * 100 : 0}%` }} /></div></div>
+    {session.exercises.map(item => item.kind === 'strength' ? <ExerciseBlock key={item.id} item={item} onChange={onChange} onError={onError} /> : <TimedExerciseBlock key={item.id} item={item} onChange={onChange} onError={onError} />)}
     <button className="primaryButton finishButton" onClick={complete} disabled={busy || saved !== total || total === 0}>Завершить тренировку</button>
-    <p className="hint">Записанные подходы сохраняются сразу. К тренировке можно вернуться позже.</p>
+    <p className="hint">Результаты сохраняются сразу. К тренировке можно вернуться позже.</p>
   </>
 }

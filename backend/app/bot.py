@@ -10,8 +10,8 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .db import SessionLocal
-from .models import Reminder, User, WorkoutTemplate
-from .planning import PHASES, get_or_create_session
+from .models import Reminder, User, WeekOverride, WorkoutTemplate
+from .planning import PHASES, get_or_create_session, monday
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -64,10 +64,19 @@ async def today(message: Message):
         if not templates:
             await message.answer("На сегодня тренировок нет.", reply_markup=app_button())
             return
+        found = False
         for template in templates:
             session = get_or_create_session(db, template, local_today)
             if session:
+                found = True
                 await message.answer(format_plan(session, local_today), reply_markup=app_button(session.id))
+        if templates and not found:
+            vacation = db.scalar(select(WeekOverride).where(
+                WeekOverride.user_id == user.telegram_id,
+                WeekOverride.week_start == monday(local_today),
+                WeekOverride.kind == "vacation"))
+            await message.answer("На этой неделе отпуск. Тренировки продолжатся после него." if vacation else
+                                 "В плане пока нет упражнений. Добавьте их в Mini App.", reply_markup=app_button())
 
 
 def format_plan(session, display_date) -> str:
@@ -77,6 +86,9 @@ def format_plan(session, display_date) -> str:
         reason = {"scheduled": "по календарю", "auto": "по сигналам восстановления", "manual": "по вашему выбору"}[session.week.deload_reason]
         lines.append(f"Легкая неделя {reason}")
     for exercise in session.exercises:
+        if exercise.kind != "strength":
+            lines.append(f"• {exercise.name}: {exercise.target_duration_minutes} мин")
+            continue
         lines.append(
             f"• {exercise.name}: {exercise.sets_count} × {exercise.target_reps} "
             f"по {float(exercise.target_weight):g} кг"

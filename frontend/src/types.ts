@@ -1,7 +1,7 @@
 export type Phase = 'light' | 'medium' | 'heavy' | 'accumulation' | 'deload'
 
 export interface Movement {
-  id: string; name: string; primary_group: string; secondary_groups: string[]; is_anchor: boolean
+  id: string; name: string; kind: 'strength' | 'cardio' | 'stretch' | 'other_timed'; primary_group: string; secondary_groups: string[]; is_anchor: boolean
 }
 
 export interface MuscleTarget { min_sets: number; max_sets: number; cap_sets: number }
@@ -25,6 +25,7 @@ export interface Exercise {
   rep_min: number
   rep_max: number
   rir_target: number
+  duration_minutes: number | null
 }
 
 export type ExerciseInput = Omit<Exercise, 'id'>
@@ -52,6 +53,9 @@ export interface SessionExercise {
   id: string
   exercise_id: string
   name: string
+  kind: Movement['kind']
+  target_duration_minutes: number | null
+  actual_duration_minutes: number | null
   position: number
   sets_count: number
   weight_step: number
@@ -114,3 +118,5 @@ export interface Me {
   volume_cap: number
   has_started_bot: boolean
 }
+
+export interface NextWeek { week_start: string; kind: 'deload' | 'vacation' | null }
