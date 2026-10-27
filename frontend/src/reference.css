@@ -230,13 +230,27 @@ h2 { font-weight: 650; }
 .isWorkout .meterTrack div { background: #83a2db; }
 .checkboxField { display: flex; align-items: center; gap: 10px; margin: 10px 0 18px; color: var(--ink); font-size: .86rem; cursor: pointer; }
 .checkboxField input[type="checkbox"] { appearance: auto; width: 18px; height: 18px; min-width: 18px; min-height: 18px; margin: 0; padding: 0; flex: none; accent-color: #222326; }
-.homeGuide { margin: 32px 0 12px; padding: 21px; border: 1px solid #e8e9ec; border-radius: 24px; background: #fff; color: var(--ink); box-shadow: 0 7px 28px rgba(24, 31, 43, .035); }
-.homeGuide h2 { margin: 0 0 12px; font-size: 1.18rem; }
-.homeGuide p, .homeGuide li { color: #555b63; font-size: .85rem; line-height: 1.5; }
-.homeGuide p { margin: 0 0 11px; }
-.homeGuide p:last-child { margin-bottom: 0; }
-.homeGuide ol { margin: 0 0 11px; padding-left: 20px; }
-.homeGuide li + li { margin-top: 5px; }
+.homeGuide { margin: 32px 0 12px; padding: 0; overflow: hidden; border: 1px solid #e8e9ec; border-radius: 24px; background: #fff; color: var(--ink); box-shadow: 0 7px 28px rgba(24, 31, 43, .035); }
+.homeGuideHeader { padding: 23px 23px 17px; }
+.homeGuideEyebrow { display: block; margin-bottom: 5px; color: #858b93; font-size: .7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.homeGuide h2 { margin: 0; font-size: 1.2rem; line-height: 1.2; }
+.homeGuideList { padding: 0 14px 11px; }
+.homeGuideItem { border-top: 1px solid #e8eaed; }
+.homeGuideItem h3 { margin: 0; font-size: inherit; letter-spacing: 0; }
+.homeGuideItem h3 button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 57px; padding: 12px 9px; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.homeGuideItem h3 button:hover { color: #315d7d; }
+.homeGuideItem h3 button:focus-visible { outline: 2px solid #779ad2; outline-offset: -2px; border-radius: 9px; }
+.homeGuideIndex { flex: 0 0 24px; align-self: flex-start; padding-top: 4px; color: #a0a7ae; font-size: .69rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.homeGuideQuestion { flex: 1; font-size: .87rem; line-height: 1.4; font-weight: 650; }
+.homeGuideToggle { display: grid; flex: 0 0 31px; width: 31px; height: 31px; place-items: center; border-radius: 50%; background: #f1f3f5; color: #3c4854; }
+.homeGuideToggle svg { transition: transform .18s ease; }
+.homeGuideItem.isOpen .homeGuideQuestion { color: #264f70; }
+.homeGuideItem.isOpen .homeGuideToggle { background: #e7f0f8; color: #315d7d; }
+.homeGuideItem.isOpen .homeGuideToggle svg { transform: rotate(45deg); }
+.homeGuideAnswer { padding: 0 50px 19px 44px; }
+.homeGuideAnswer[hidden] { display: none; }
+.homeGuideAnswer p { margin: 0; color: #555f6a; font-size: .85rem; line-height: 1.58; }
+.homeGuideAnswer p + p { margin-top: 11px; }
 .todayHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .todayHeading h1 { margin: 0; }
 .nextWeekControl { position: relative; }
@@ -249,10 +263,6 @@ h2 { font-weight: 650; }
 .nextWeekMenu button.selected { background: #eaf4ef; border-color: #75b697; }
 .nextWeekMenu button small { display: block; margin-top: 2px; font-weight: 400; color: #6c747d; }
 .nextWeekMenu button.clearWeek { color: #9c3232; }
-.homeGuide details { border-top: 1px solid #e6e9ed; padding: 11px 0; }
-.homeGuide details:last-child { padding-bottom: 0; }
-.homeGuide summary { cursor: pointer; font-size: .87rem; font-weight: 700; line-height: 1.4; }
-.homeGuide details p { margin: 9px 0 0; }
 .timedInputRow { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin: 16px 0; }
 .timedInputRow .setField { flex: 1 1 150px; max-width: 220px; }
 .setRow .setField { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: stretch; gap: 3px; }
