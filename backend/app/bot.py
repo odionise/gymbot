@@ -71,12 +71,19 @@ async def today(message: Message):
 
 
 def format_plan(session, display_date) -> str:
-    lines = [f"{session.template_name} · {PHASES[session.phase]} · {display_date:%d.%m.%Y}"]
+    phase = "Легкая неделя" if session.phase_type == "deload" else "накопление" if session.phase_type else PHASES[session.phase]
+    lines = [f"{session.template_name} · {phase} · {display_date:%d.%m.%Y}"]
+    if session.week and session.week.deload_reason:
+        reason = {"scheduled": "по календарю", "auto": "по сигналам восстановления", "manual": "по вашему выбору"}[session.week.deload_reason]
+        lines.append(f"Легкая неделя {reason}")
     for exercise in session.exercises:
         lines.append(
             f"• {exercise.name}: {exercise.sets_count} × {exercise.target_reps} "
             f"по {float(exercise.target_weight):g} кг"
+            + (f" · ПДО {float(exercise.target_rir):g}" if exercise.target_rir is not None else "")
         )
+        if exercise.action_label:
+            lines.append(f"  {exercise.action_label}")
     return "\n".join(lines)
 
 

@@ -9,7 +9,7 @@ import type { Me, Template, WorkoutSession } from './types'
 
 type Tab = 'today' | 'progress' | 'history' | 'program'
 const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-export const phaseText = { light: 'Лёгкая', medium: 'Средняя', heavy: 'Тяжёлая' }
+export const phaseText = { light: 'Лёгкая', medium: 'Средняя', heavy: 'Тяжёлая', accumulation: 'Накопление', deload: 'Легкая неделя' }
 export const formatWeight = (weight: number) => weight.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
 export function countWord(count: number, one: string, few: string, many: string) {
   const lastTwo = count % 100
@@ -46,7 +46,7 @@ export default function App() {
     setMe(profile)
     setTemplates(program)
     setSessions(today)
-    setCompletedToday(history.filter(item => item.scheduled_date === localDate))
+    setCompletedToday(history.filter(item => (item.actual_date ?? item.scheduled_date) === localDate))
   }, [])
 
   useEffect(() => {
@@ -102,7 +102,7 @@ export default function App() {
             <div className="heroTop"><span className="heroKicker">Тренировка по плану</span><span className={`phasePill phase-${session.phase}`}>{phaseText[session.phase]}</span></div>
             <h2 className="heroTitle">{session.template_name}</h2>
             <div className="heroMeta">{session.muscle_group} · {session.exercises.length} {countWord(session.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</div>
-            <div className="phaseRail" aria-label={`Фаза цикла: ${phaseText[session.phase]}`}><span className={session.phase === 'light' ? 'current' : ''} /><span className={session.phase === 'medium' ? 'current' : ''} /><span className={session.phase === 'heavy' ? 'current' : ''} /></div>
+            <div className="phaseRail" aria-label={`Фаза цикла: ${phaseText[session.phase]}`}><span className="current" /><span className={session.phase === 'deload' ? 'current' : ''} /></div>
             <div className="heroExercises">{session.exercises.slice(0, 3).map(item => <div className="heroExercise" key={item.id}><span>{item.name}</span><strong>{formatWeight(item.target_weight)} кг · {item.sets_count} × {item.target_reps}</strong></div>)}{session.exercises.length > 3 && <span className="heroMore">И ещё {session.exercises.length - 3}</span>}</div>
             <button className="heroFooter" onClick={() => openSession(session.id)}><span>{session.status === 'in_progress' ? 'Продолжить тренировку' : 'Начать тренировку'}</span><span aria-hidden="true">→</span></button>
           </article>
@@ -111,12 +111,23 @@ export default function App() {
         {templates.length ? <div className="templateList">{templates.map((template, index) =>
           <div className="templateMini" key={template.id}>
             <span className="templateOrder">{index + 1}</span>
-            <div className="templateDetails"><strong>{template.name}</strong><small>{completedToday.some(item => item.template_id === template.id) ? 'Завершено сегодня' : `${weekdays[template.weekday]} · ${template.send_time} · далее ${phaseText[template.next_phase].toLowerCase()}`}</small></div>
+            <div className="templateDetails"><strong>{template.name}</strong><small>{completedToday.some(item => item.template_id === template.id) ? 'Завершено сегодня' : `${weekdays[template.weekday]} · ${template.send_time}`}</small></div>
             <button className="roundButton" onClick={() => completedToday.some(item => item.template_id === template.id) ? setTab('history') : startSession(template.id)} aria-label={completedToday.some(item => item.template_id === template.id) ? `Результаты ${template.name}` : `Начать ${template.name}`}>{completedToday.some(item => item.template_id === template.id) ? '✓' : '→'}</button>
           </div>
-        )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу <span>↗</span></button>}
+        )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу</button>}
         {me && !me.has_started_bot && <p className="hint">Чтобы получать сообщения, сначала отправьте боту команду /start.</p>}
-      </> : tab === 'program' ? <ProgramView templates={templates} me={me} refresh={refresh} run={run} />
+        <section className="homeGuide" aria-labelledby="homeGuideTitle">
+          <h2 id="homeGuideTitle">Короткая справка</h2>
+          <p><strong>ПДО — повторы до отказа.</strong> Укажите, сколько повторов вы смогли бы сделать ещё с правильной техникой. Например, ПДО 2 означает, что оставалось примерно два повтора.</p>
+          <ol>
+            <li>В разделе «Программа» задайте дни, упражнения и рабочие веса.</li>
+            <li>Во время тренировки запишите вес, повторы и ПДО каждого рабочего подхода. Значения можно менять стрелками.</li>
+            <li>Сохраните подходы и нажмите «Завершить тренировку». Следующий план обновится по результатам.</li>
+          </ol>
+          <p>Разминочные подходы сохраняются отдельно и не входят в недельный объём.</p>
+          <p><strong>Легкая неделя</strong> нужна для восстановления: план уменьшает число рабочих подходов примерно вдвое, не повышает вес и ставит цель ПДО 4. Планово она идёт после трёх недель накопления.</p>
+        </section>
+      </> : tab === 'program' ? <ProgramView templates={templates} run={run} />
         : tab === 'progress' ? <ProgressView />
           : <HistoryView />}
     </main>

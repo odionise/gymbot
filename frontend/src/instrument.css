@@ -61,9 +61,8 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .roundButton { width: 44px; height: 44px; flex: none; border: 1px solid #aebbb0; border-radius: 50%; background: transparent; color: var(--ink); font-size: 1.2rem; }
 .hint { margin: 18px 0; color: var(--muted); font-size: .78rem; line-height: 1.5; }
 .primaryButton, .outlineButton { width: 100%; min-height: 49px; margin-top: 16px; padding: 10px 17px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-radius: 999px; text-align: left; font-size: .89rem; font-weight: 600; }
-.primaryButton { border: 0; background: var(--forest); color: white; }
+.primaryButton { width: max-content; max-width: 100%; padding-inline: 20px; display: inline-flex; justify-content: center; border: 0; background: var(--forest); color: white; text-align: center; }
 .outlineButton { border: 1px solid #aebbb0; background: transparent; color: var(--ink); }
-.primaryButton span { font-size: 1.15rem; font-weight: 400; }
 .bottomNav { position: fixed; z-index: 5; left: 50%; bottom: 0; transform: translateX(-50%); width: min(700px,100%); min-height: calc(69px + env(safe-area-inset-bottom)); padding: 7px 10px calc(7px + env(safe-area-inset-bottom)); display: flex; border-top: 1px solid var(--line); background: #f3f3edee; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .bottomNav button { flex: 1; min-width: 0; min-height: 51px; padding: 4px 2px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 0; border-radius: 8px; background: transparent; color: #7b877d; font-size: .67rem; }
 .bottomNav button.active { color: var(--forest); font-weight: 650; }

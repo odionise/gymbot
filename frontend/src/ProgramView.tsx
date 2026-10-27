@@ -1,29 +1,45 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { IconX } from '@tabler/icons-react'
+import { IconChevronDown, IconX } from '@tabler/icons-react'
 import { api } from './api'
 import { ChoiceDropdown } from './ChoiceDropdown'
 import { muscleGroups as suggestedGroups, parseMuscleGroups } from './muscleGroups'
 import { TimePicker } from './TimePicker'
-import { countWord, formatWeight, phaseText } from './App'
-import type { Exercise, ExerciseInput, Me, Template } from './types'
+import { MovementCatalog } from './MovementCatalog'
+import { filterMovements, normalizeMovementSearch } from './movementSearch'
+import { countWord, formatWeight } from './App'
+import type { Exercise, ExerciseInput, Movement, Template } from './types'
 
 const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
 const emptyExercise: ExerciseInput = {
   name: '', position: 0, sets_count: 3, medium_weight: 0, weight_step: 2.5,
   light_factor: 0.9, heavy_factor: 1.05,
   light_min: 12, light_max: 15, medium_min: 8, medium_max: 12, heavy_min: 6, heavy_max: 8,
+  movement_id: null, rep_min: 6, rep_max: 12, rir_target: 2,
 }
 
-function ExerciseEditor({ template, exercise, onClose, run }: {
-  template: Template; exercise?: Exercise; onClose: () => void; run: (action: () => Promise<unknown>) => Promise<void>
+function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, run }: {
+  template: Template; exercise?: Exercise; movements: Movement[]; detailGroups: Record<string, string[]>;
+  onClose: () => void; run: (action: () => Promise<unknown>) => Promise<void>
 }) {
   const [form, setForm] = useState<ExerciseInput>(exercise ? { ...exercise } : { ...emptyExercise, position: template.exercises.length })
-  useEffect(() => setForm(exercise ? { ...exercise } : { ...emptyExercise, position: template.exercises.length }), [exercise?.id, template.id])
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [muscleFilter, setMuscleFilter] = useState('all')
+  const [search, setSearch] = useState('')
+  useEffect(() => {
+    setForm(exercise ? { ...exercise } : { ...emptyExercise, position: template.exercises.length })
+    setPickerOpen(false)
+    setMuscleFilter('all'); setSearch('')
+  }, [exercise?.id, template.id])
+  const muscleOptions = Object.values(detailGroups).flat()
+  const filteredMovements = filterMovements(movements, muscleFilter, search)
+  const query = normalizeMovementSearch(search)
+  const selectedMovement = movements.find(item => item.id === form.movement_id)
   const numberField = (key: keyof ExerciseInput, label: string, step = '1') =>
-    <label className="field"><span>{label}</span><input type="number" step={step} value={form[key]} onChange={event => setForm({ ...form, [key]: Number(event.target.value) })} /></label>
+    <label className="field"><span>{label}</span><input type="number" step={step} value={form[key] ?? ''} onChange={event => setForm({ ...form, [key]: Number(event.target.value) })} /></label>
   const save = async (event: FormEvent) => {
     event.preventDefault()
+    if (!form.movement_id) return
     await run(async () => {
       if (exercise) await api.updateExercise(exercise.id, form)
       else await api.createExercise(template.id, form)
@@ -32,19 +48,22 @@ function ExerciseEditor({ template, exercise, onClose, run }: {
   }
   return <form className="editorPanel" onSubmit={save}>
     <div className="editorTitle"><h3>{exercise ? 'Изменить упражнение' : 'Новое упражнение'}</h3><button type="button" onClick={onClose}>×</button></div>
-    <label className="field"><span>Название</span><input required maxLength={120} value={form.name} placeholder="Например, жим лёжа" onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-    <div className="fieldGrid">{numberField('medium_weight', 'Вес среднего дня, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Подходов')}{numberField('position', 'Порядок')}</div>
-    <div className="editorDivider">ДИАПАЗОНЫ ПОВТОРОВ</div>
-    <div className="fieldGrid">{numberField('light_min', 'Лёгкая: от')}{numberField('light_max', 'Лёгкая: до')}{numberField('medium_min', 'Средняя: от')}{numberField('medium_max', 'Средняя: до')}{numberField('heavy_min', 'Тяжёлая: от')}{numberField('heavy_max', 'Тяжёлая: до')}</div>
-    <div className="editorDivider">НАЧАЛЬНЫЙ ВЕС</div>
-    <p className="fieldHelp">Множитель от веса среднего дня. 0,9 = 90%, 1,05 = 105%.</p>
-    <div className="fieldGrid">{numberField('light_factor', 'Лёгкая', '0.01')}{numberField('heavy_factor', 'Тяжёлая', '0.01')}</div>
-    <button className="primaryButton" type="submit">Сохранить упражнение <span>↗</span></button>
+    <button type="button" className="movementPickerTrigger" aria-label={selectedMovement ? `Выбрать упражнение. Сейчас: ${selectedMovement.name}` : 'Выбрать упражнение'} aria-expanded={pickerOpen} aria-controls={`movement-picker-${exercise?.id ?? 'new'}`} onClick={() => setPickerOpen(!pickerOpen)}>
+      <span><strong>{selectedMovement?.name ?? 'Выберите упражнение'}</strong>{selectedMovement && <small>{selectedMovement.primary_group}{selectedMovement.secondary_groups.length ? ` · дополнительно: ${selectedMovement.secondary_groups.join(', ')}` : ''}</small>}</span><IconChevronDown size={19} stroke={1.8} aria-hidden="true" />
+    </button>
+    {pickerOpen && <div className="movementPickerPanel" id={`movement-picker-${exercise?.id ?? 'new'}`}>
+      <div className="catalogFilters"><ChoiceDropdown label="Основная мышца" value={muscleFilter} options={[{ value: 'all', label: 'Все мышцы' }, ...muscleOptions.map(group => ({ value: group, label: group }))]} onChange={setMuscleFilter} /><label className="field"><span>Поиск по названию</span><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Например, шта или мах" /></label></div>
+      {query.length > 0 && query.length < 3 && <p className="fieldHelp">Введите не меньше трёх букв для поиска.</p>}
+      <div className="movementChoiceList" role="listbox" aria-label="Выберите упражнение">{filteredMovements.length ? filteredMovements.map(item => <button type="button" role="option" key={item.id} className={form.movement_id === item.id ? 'selected' : ''} aria-selected={form.movement_id === item.id} onClick={() => { setForm({ ...form, movement_id: item.id, name: item.name }); setPickerOpen(false) }}><strong>{item.name}</strong><small>{item.primary_group}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></button>) : <p className="fieldHelp">Упражнения не найдены. Добавьте движение в «Списке упражнений».</p>}</div>
+    </div>}
+    <div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}{numberField('position', 'Порядок')}</div>
+    <div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}{numberField('rir_target', 'Целевой ПДО', '0.5')}</div>
+    <button className="primaryButton" type="submit" disabled={!form.movement_id}>Сохранить упражнение</button>
   </form>
 }
 
-export function ProgramView({ templates, me, refresh, run }: {
-  templates: Template[]; me: Me | null; refresh: () => Promise<void>;
+export function ProgramView({ templates, run }: {
+  templates: Template[];
   run: (action: () => Promise<unknown>) => Promise<void>
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(templates[0]?.id ?? null)
@@ -56,7 +75,9 @@ export function ProgramView({ templates, me, refresh, run }: {
   const [sendTime, setSendTime] = useState('09:00')
   const [editingTemplate, setEditingTemplate] = useState(false)
   const [exerciseEditor, setExerciseEditor] = useState<string | 'new' | null>(null)
-  const [timezone, setTimezone] = useState(me?.timezone ?? 'Europe/Moscow')
+  const [movements, setMovements] = useState<Movement[]>([])
+  const [detailGroups, setDetailGroups] = useState<Record<string, string[]>>({})
+  useEffect(() => { Promise.all([api.movements(), api.muscleGroups()]).then(([items, groups]) => { setMovements(items); setDetailGroups(groups) }).catch(() => {}) }, [])
 
   useEffect(() => {
     if (selected) {
@@ -64,7 +85,6 @@ export function ProgramView({ templates, me, refresh, run }: {
       setWeekday(selected.weekday); setSendTime(selected.send_time)
     }
   }, [selectedId, selected?.name, selected?.muscle_group, selected?.weekday, selected?.send_time])
-  useEffect(() => setTimezone(me?.timezone ?? 'Europe/Moscow'), [me?.timezone])
 
   const saveTemplate = async (event: FormEvent) => {
     event.preventDefault()
@@ -95,14 +115,17 @@ export function ProgramView({ templates, me, refresh, run }: {
       <label className="field"><span>Название тренировки</span><input required maxLength={120} value={name} placeholder="Например, Грудь и трицепс" onChange={event => setName(event.target.value)} /></label>
       <div className="groupField"><span className="filterLabel">Мышечные группы</span>{selectedGroups.length > 0 && <div className="groupChips">{selectedGroups.map(group => <button type="button" key={group} onClick={() => setSelectedGroups(selectedGroups.filter(item => item !== group))} aria-label={`Убрать группу ${group}`}>{group}<IconX size={15} stroke={1.8} aria-hidden="true" /></button>)}</div>}{suggestedGroups.some(group => !selectedGroups.includes(group)) ? <ChoiceDropdown label="Мышечные группы" hideLabel value="" options={suggestedGroups.filter(group => !selectedGroups.includes(group)).map(group => ({ value: group, label: group }))} placeholder="+ Добавить группу" onChange={group => { setSelectedGroups([...selectedGroups, group]); setGroupError('') }} /> : <div className="allGroupsSelected">Все группы выбраны</div>}{groupError && <small className="fieldError" role="alert">{groupError}</small>}</div>
       <div className="fieldGrid scheduleFields"><ChoiceDropdown label="День недели" value={String(weekday)} options={weekdays.map((day, index) => ({ value: String(index), label: day }))} onChange={value => setWeekday(Number(value))} /><TimePicker label="Начало тренировки" value={sendTime} onChange={setSendTime} /></div>
-      <button className="primaryButton" type="submit">Сохранить тренировку <span>↗</span></button>
-    </form> : selected && <>
-      <div className="programCard"><div className="programCardTop"><span>{weekdays[selected.weekday]} · {selected.send_time}</span><span className={`phasePill phase-${selected.next_phase}`}>Далее: {phaseText[selected.next_phase]}</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
+      <button className="primaryButton" type="submit">Сохранить тренировку</button>
+    </form> : selected && <section className="programSessionBlock" aria-label={`Настройка тренировки ${selected.name}`}>
+      <div className="programCard"><div className="programCardTop"><span>{weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
       <div className="sectionHead"><h2>Упражнения</h2><span>{selected.exercises.length}</span></div>
-      {selected.exercises.map((exercise, index) => <div className="programExercise" key={exercise.id}><span className="programNumber">{index + 1}</span><div><strong>{exercise.name}</strong><small>{exercise.sets_count} {countWord(exercise.sets_count, 'подход', 'подхода', 'подходов')} · {formatWeight(exercise.medium_weight)} кг средний день · шаг {formatWeight(exercise.weight_step)} кг</small></div><button onClick={() => setExerciseEditor(exercise.id)} aria-label={`Изменить ${exercise.name}`}>✎</button><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>)}
-      {exerciseEditor && <ExerciseEditor template={selected} exercise={selected.exercises.find(item => item.id === exerciseEditor)} onClose={() => setExerciseEditor(null)} run={run} />}
-      {!exerciseEditor && <button className="outlineButton" onClick={() => setExerciseEditor('new')}>+ Добавить упражнение</button>}
-    </>}
-    <div className="settingsBlock"><div className="sectionHead"><h2>Уведомления</h2></div><label className="field"><span>Часовой пояс (IANA)</span><input value={timezone} onChange={event => setTimezone(event.target.value)} placeholder="Europe/Moscow" /></label><button className="outlineButton" onClick={() => run(async () => { await api.updateMe(timezone); await refresh() })}>Сохранить часовой пояс</button></div>
+      {selected.exercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; return <div className="programExerciseItem" key={exercise.id}>
+        <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · {exercise.sets_count} подхода · {exercise.rep_min}–{exercise.rep_max} · {formatWeight(exercise.medium_weight)} кг</small></div><button onClick={() => setExerciseEditor(expanded ? null : exercise.id)} aria-label={`${expanded ? 'Свернуть настройки' : 'Изменить'} ${exercise.name}`} aria-expanded={expanded} aria-controls={`exercise-editor-${exercise.id}`}>✎</button><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
+        {expanded && <div className="programInlineEditor" id={`exercise-editor-${exercise.id}`}><ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} exercise={exercise} onClose={() => setExerciseEditor(null)} run={run} /></div>}
+      </div> })}
+      {exerciseEditor === 'new' && <ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} onClose={() => setExerciseEditor(null)} run={run} />}
+      {exerciseEditor !== 'new' && <button className="outlineButton" onClick={() => setExerciseEditor('new')}>+ Добавить упражнение</button>}
+    </section>}
+    <MovementCatalog movements={movements} detailGroups={detailGroups} refreshMovements={async () => setMovements(await api.movements())} run={run} />
   </>
 }

@@ -1,4 +1,4 @@
-import type { ExerciseInput, Me, Progress, Template, WorkoutSession } from './types'
+import type { ExerciseInput, Me, Movement, MuscleTarget, Progress, Template, WorkoutSession } from './types'
 
 declare global {
   interface Window {
@@ -32,6 +32,13 @@ const json = (value: unknown) => JSON.stringify(value)
 export const api = {
   me: () => request<Me>('/me'),
   updateMe: (timezone: string) => request<Me>('/me', { method: 'PATCH', body: json({ timezone }) }),
+  updateVolumeCap: (volume_cap: number) => request<Me>('/me/volume-cap', { method: 'PATCH', body: json({ volume_cap }) }),
+  muscleGroups: () => request<Record<string, string[]>>('/muscle-groups'),
+  muscleTargets: () => request<Record<string, MuscleTarget>>('/muscle-targets'),
+  updateMuscleTarget: (group: string, data: MuscleTarget) => request('/muscle-targets/' + encodeURIComponent(group), { method: 'PUT', body: json(data) }),
+  movements: () => request<Movement[]>('/movements'),
+  createMovement: (data: Omit<Movement, 'id'>) => request<Movement>('/movements', { method: 'POST', body: json(data) }),
+  updateMovement: (id: string, data: Omit<Movement, 'id'>) => request<Movement>(`/movements/${id}`, { method: 'PUT', body: json(data) }),
   templates: () => request<Template[]>('/templates'),
   createTemplate: (data: { name: string; muscle_group: string; weekday: number; send_time: string }) =>
     request<Template>('/templates', { method: 'POST', body: json(data) }),
@@ -49,11 +56,15 @@ export const api = {
   history: () => request<WorkoutSession[]>('/sessions'),
   override: (id: string, target_weight: number, target_reps: number) =>
     request<WorkoutSession>(`/session-exercises/${id}/target`, { method: 'PATCH', body: json({ target_weight, target_reps }) }),
-  saveSet: (id: string, index: number, weight: number, reps: number) =>
-    request<WorkoutSession>(`/session-exercises/${id}/sets/${index}`, { method: 'PUT', body: json({ weight, reps }) }),
+  saveSet: (id: string, index: number, weight: number, reps: number, rir_reported: number | null, is_working = true) =>
+    request<WorkoutSession>(`/session-exercises/${id}/sets/${index}`, { method: 'PUT', body: json({ weight, reps, rir_reported, is_working }) }),
   deleteSet: (id: string, index: number) => request<WorkoutSession>(`/session-exercises/${id}/sets/${index}`, { method: 'DELETE' }),
   skip: (id: string, skipped: boolean) =>
     request<WorkoutSession>(`/session-exercises/${id}/skip`, { method: 'PATCH', body: json({ skipped }) }),
+  changeSetsCount: (id: string, sets_count: number) => request<WorkoutSession>(`/session-exercises/${id}/sets-count`, { method: 'PATCH', body: json({ sets_count }) }),
   complete: (id: string) => request<WorkoutSession>(`/sessions/${id}/complete`, { method: 'POST' }),
+  reschedule: (id: string, scheduled_date: string) => request<WorkoutSession>(`/sessions/${id}/reschedule`, { method: 'PATCH', body: json({ scheduled_date }) }),
+  manualDeload: (week_start: string) => request(`/weeks/${week_start}/manual-deload`, { method: 'POST' }),
+  setRecovery: (week_start: string, feeling_beat_up: boolean) => request(`/weeks/${week_start}/recovery`, { method: 'PATCH', body: json({ feeling_beat_up }) }),
   progress: () => request<Progress>('/progress'),
 }

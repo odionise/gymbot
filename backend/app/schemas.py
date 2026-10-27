@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .muscles import MUSCLE_GROUPS, split_muscle_groups
+from .muscles import ALL_DETAILED_GROUPS, MUSCLE_GROUPS, split_muscle_groups
 
 
 class SettingsIn(BaseModel):
@@ -46,12 +46,59 @@ class ExerciseIn(BaseModel):
     medium_max: int = Field(default=12, ge=1, le=50)
     heavy_min: int = Field(default=6, ge=1, le=50)
     heavy_max: int = Field(default=8, ge=1, le=50)
+    movement_id: str | None = None
+    rep_min: int | None = Field(default=None, ge=1, le=50)
+    rep_max: int | None = Field(default=None, ge=1, le=50)
+    rir_target: float = Field(default=2, ge=0, le=6, multiple_of=0.5)
 
     @model_validator(mode="after")
     def valid_ranges(self):
         for phase in ("light", "medium", "heavy"):
             if getattr(self, f"{phase}_min") > getattr(self, f"{phase}_max"):
                 raise ValueError(f"{phase}: min cannot exceed max")
+        if self.rep_min is not None and self.rep_max is not None and self.rep_min > self.rep_max:
+            raise ValueError("rep_min cannot exceed rep_max")
+        return self
+
+
+class MovementIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    primary_group: str
+    secondary_groups: list[str] = Field(default_factory=list)
+    is_anchor: bool = False
+
+    @model_validator(mode="after")
+    def valid_groups(self):
+        if self.primary_group not in ALL_DETAILED_GROUPS:
+            raise ValueError("Choose a detailed primary muscle group")
+        if (self.primary_group in self.secondary_groups or
+                len(set(self.secondary_groups)) != len(self.secondary_groups) or
+                any(group not in ALL_DETAILED_GROUPS for group in self.secondary_groups)):
+            raise ValueError("Invalid secondary muscle groups")
+        return self
+
+
+class RescheduleIn(BaseModel):
+    scheduled_date: str
+
+
+class RecoveryIn(BaseModel):
+    feeling_beat_up: bool
+
+
+class VolumeCapIn(BaseModel):
+    volume_cap: int = Field(ge=8, le=30)
+
+
+class MuscleTargetIn(BaseModel):
+    min_sets: int = Field(ge=1, le=30)
+    max_sets: int = Field(ge=1, le=30)
+    cap_sets: int = Field(ge=1, le=30)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if not self.min_sets <= self.max_sets <= self.cap_sets:
+            raise ValueError("Minimum, maximum and cap must be ordered")
         return self
 
 
@@ -60,9 +107,21 @@ class OverrideIn(BaseModel):
     target_reps: int = Field(ge=1, le=50)
 
 
+class SetsCountIn(BaseModel):
+    sets_count: int = Field(ge=1, le=12)
+
+
 class ResultIn(BaseModel):
     weight: float = Field(ge=0, le=1000)
     reps: int = Field(ge=0, le=100)
+    rir_reported: float | None = Field(default=None, ge=0, le=10, multiple_of=0.5)
+    is_working: bool = True
+
+    @model_validator(mode="after")
+    def working_rir(self):
+        if self.is_working and self.rir_reported is None:
+            raise ValueError("Для рабочего подхода укажите ПДО")
+        return self
 
 
 class SkipIn(BaseModel):
