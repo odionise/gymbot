@@ -1,9 +1,9 @@
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import text
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from app.analytics import progress_for_user
 from app.bot import format_plan
@@ -69,15 +69,6 @@ def test_next_week_choice_can_be_changed_before_sessions(database):
         assert resolve_week(db, 1, start).phase_type == 'accumulation'
 
 
-@pytest.fixture
-def database(tmp_path):
-    engine = make_engine('sqlite:///' + str(tmp_path / 'test.db'))
-    migrate(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    yield factory
-    engine.dispose()
-
-
 def make_program(db: Session, user_id=1, sets=3, secondary=''):
     db.add(User(telegram_id=user_id))
     template = WorkoutTemplate(user_id=user_id, name='Верх', muscle_group='Грудь, Руки',
@@ -104,7 +95,9 @@ def finish(db, session, reps=8, rir=2, actual=None):
                          rir_target=item.target_rir, is_working=True))
     session.status = 'completed'
     session.actual_date = actual or session.scheduled_date
-    session.completed_at = utcnow()
+    # Synthetic sessions follow their supplied dates, independent of wall time
+    # and of how quickly the test runner executes consecutive workouts.
+    session.completed_at = datetime.combine(session.actual_date, time(12), timezone.utc)
     db.commit()
 
 

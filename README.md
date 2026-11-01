@@ -59,6 +59,56 @@ docker compose --env-file .env.local -f compose.local.yaml exec -T api python -m
 3. В `frontend` установите зависимости через `npm install` и запустите `VITE_DEV_TELEGRAM_ID=<ваш ID> npm run dev` (в PowerShell: `$env:VITE_DEV_TELEGRAM_ID='<ваш ID>'; npm run dev`). Откройте `http://localhost:5173`.
 4. Для тестов сервера: из `backend` запустите `pytest`.
 
+### Сравнение независимых вариантов: база этапа 0
+
+Общий исходный commit: `e49360fc1f2f2696ba6ba0e3ca506af0245224b3`. Каждый вариант использует собственную ветку, окружение и тестовую базу. Проверки этого этапа не запускают API lifespan, Telegram-бота, webhook или рассылку. Фактические результаты и известные падения перечислены в [PROJECT_STATUS.md](PROJECT_STATUS.md).
+
+Из корня отдельного clone:
+
+```powershell
+New-Item -ItemType Directory -Path .venv/tmp -Force | Out-Null
+$env:TEMP = (Resolve-Path .venv/tmp).Path
+$env:TMP = $env:TEMP
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt -c backend/requirements-baseline.txt
+$env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = '1'
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/tests -q -m 'not history_regression' --basetemp=.venv/pytest-stage0
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/tests -q -m history_regression --basetemp=.venv/pytest-stage0
+```
+
+Временный каталог внутри игнорируемого `.venv` используется из-за отказа записи Python в системный TEMP внутри текущего Windows sandbox. Путь `.venv/pytest-stage0` зарезервирован для pytest и пересоздаётся при запуске; ручные данные в него не помещать.
+
+`requirements-baseline.txt` фиксирует разрешённые существующим `requirements.txt` зависимости для сравнения на Windows / Python 3.14.5. Это отдельные ограничения тестовой базы; production-зависимости не изменены. На другой ОС могут добавиться платформенные зависимости исходного requirements. Фронтенд устанавливается существующим `pnpm install --frozen-lockfile` (pnpm 11.25.0) и проверяется `pnpm run build` из `frontend`; lockfile не пересоздавать.
+
+Если глобальный pnpm недоступен, тот же инструмент можно установить только в игнорируемое окружение проекта. Этот путь использован в текущей Windows-проверке:
+
+```powershell
+npm install --prefix .venv/frontend-tools --no-save --ignore-scripts --package-lock=false --cache .venv/npm-cache pnpm@11.25.0
+Push-Location frontend
+node ../.venv/frontend-tools/node_modules/pnpm/bin/pnpm.cjs install --frozen-lockfile --store-dir ../.venv/pnpm-store
+node ../.venv/frontend-tools/node_modules/pnpm/bin/pnpm.cjs run build
+Pop-Location
+```
+
+Первая группа проверяет существующие сценарии, сохранность снимков и миграцию. Вторая содержит шесть обычных падающих регрессий смешивания истории: это воспроизведённые дефекты, а не `xfail` и не успешная проверка. Полный запуск без `-m` включает обе группы и пока завершается с ошибкой.
+
+Общий helper `replace` в `tests/test_history.py` воспроизводит текущий PUT назначения. Перед изменением API замены согласуйте контракт двух вариантов и адаптацию helper, сохранив проверки пользовательского результата.
+
+`tests/conftest.py` до импорта приложения принудительно задаёт development, пустой токен, отключённый dev-вход и служебный SQLite in-memory URL. Данные сценариев находятся во временных SQLite-файлах pytest. Календарные часы планирования, завершения, бота и аналитики устанавливаются на 26.10.2026 12:00 UTC и могут явно переводиться фикстурой `clock`. Синтетические завершения исходного набора используют дату сценария, поэтому порядок истории не зависит от скорости выполнения тестов.
+
+Для проверки PostgreSQL нужен отдельный временный сервер. Не использовать рабочий DATABASE_URL. Пример, если Docker Engine уже доступен:
+
+```powershell
+docker run --detach --name gymbot-stage0-yourname --label gymbot.stage=stage0 --env POSTGRES_HOST_AUTH_METHOD=trust --env POSTGRES_USER=gymbot_test --env POSTGRES_DB=gymbot_test --publish 127.0.0.1:55443:5432 --mount type=tmpfs,destination=/var/lib/postgresql/data postgres:17-alpine
+# После готовности pg_isready:
+$env:GYMBOT_TEST_POSTGRES_URL = 'postgresql+psycopg://gymbot_test@127.0.0.1:55443/gymbot_test'
+.\.venv\Scripts\python.exe -m pytest -c backend/pytest.ini backend/tests/test_migrations_legacy.py -q --basetemp=.venv/pytest-stage0
+```
+
+Имя контейнера и свободный loopback-порт должны быть своими. Доступ без пароля допустим здесь только для одноразовых синтетических данных на loopback; контейнер не подключается к постоянному volume. Тест принимает только локальную БД с именем `gymbot_test`, создаёт собственную схему `gymbot_stage0_<uuid>` и удаляет только её. Проверяются все исходные строки, ключевые связи, факты и тоннаж, неизвестные значения, доступность старой истории и повторное применение миграций 1–4. Без специального URL PostgreSQL-проверка получает явный `SKIPPED`. После проверки остановите и удалите только созданный вами тестовый контейнер; tmpfs при остановке теряется.
+
+Для одновременного browser preview на одном компьютере нужны разные Compose project names, порты и volume. В `compose.local.yaml` закреплены общее имя и порт 8080, а `local.ps1 preview` может удалить ранее настроенный локальный webhook. Эти команды не являются изолированными по одному лишь расположению clone. На этапе 0 они не используются.
+
 ## Правила прогрессии
 
 - При добавлении упражнения в день программы можно сразу создать новый вид: указать название, основную и вторичные мышцы и якорный признак. Можно также выбрать уже созданное упражнение из справочника. Старые упражнения необходимо связать со справочником: приложение не угадывает их мышечную принадлежность по названию.
