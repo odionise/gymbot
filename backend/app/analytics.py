@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .models import TrainingWeek, User, WorkoutSession
 from .muscles import split_details, split_muscle_groups
 from .planning import PHASES, monday
+from .history import snapshot_key
 
 
 def progress_for_user(db: Session, user_id: int) -> dict:
@@ -37,8 +38,10 @@ def progress_for_user(db: Session, user_id: int) -> dict:
             volume = sum(float(r.weight) * r.reps for r in results)
             strength = max((float(r.weight) * (1 + r.reps / 30)
                             for r in results if 2 <= r.reps <= 10), default=None)
-            exercise_points[exercise.exercise_id].append({
-                "name": exercise.name, "group": groups[0] if groups else "",
+            key = snapshot_key(exercise)
+            exercise_points[key].append({
+                "name": exercise.name, "template_name": session.template_name,
+                "position": exercise.position, "group": groups[0] if groups else "",
                 "groups": groups, "date": day.isoformat(), "phase": phase,
                 "weight": max(float(r.weight) for r in results),
                 "reps": max(r.reps for r in results), "volume": round(volume, 2),
@@ -57,7 +60,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                         if float(r.rir_reported) <= 3:
                             bucket["hard_sets"] += factor
                             if session.phase_type == "accumulation":
-                                bucket["reps"][(exercise.exercise_id, float(r.weight), float(r.rir_reported))].append(r.reps)
+                                bucket["reps"][(key, float(r.weight), float(r.rir_reported))].append(r.reps)
     weeks = {w.week_start: w for w in db.scalars(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id).order_by(TrainingWeek.week_start))}
     comparable = defaultdict(set)
@@ -105,7 +108,11 @@ def progress_for_user(db: Session, user_id: int) -> dict:
             signals.append(f"{group}: отмечено тяжело/болит; рост объёма приостановлен")
         rows.append(row)
     return {
-        "exercises": [{"id": key, "name": points[-1]["name"], "group": points[-1]["group"],
+        "exercises": [{"id": ":".join(value or "unknown" for value in key),
+                       "slot_id": key[0], "history_id": key[1], "movement_id": key[2], "kind": key[3],
+                       "name": points[-1]["name"],
+                       "label": f'{points[-1]["name"]} · {points[-1]["template_name"]}, место {points[-1]["position"] + 1} · база с {points[0]["date"][8:10]}.{points[0]["date"][5:7]}.{points[0]["date"][:4]}',
+                       "group": points[-1]["group"],
                        "groups": list(dict.fromkeys(g for p in points for g in p["groups"])),
                        "points": points} for key, points in exercise_points.items()],
         "weeks": rows, "signals": signals,

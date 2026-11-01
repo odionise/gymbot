@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .models import Exercise, Mesocycle, Movement, MuscleTarget, SessionExercise, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate
 from .muscles import split_details
+from .history import comparable_history, history_id, slot_id, snapshot_key
 
 PHASES = ("light", "medium", "heavy")  # historical labels
 
@@ -70,13 +71,19 @@ def week_stats(db: Session, user_id: int, start: date) -> dict:
 
 def declining_anchor(db: Session, user_id: int) -> bool:
     by_slot = defaultdict(list)
+    active = list(db.scalars(select(Exercise).join(WorkoutTemplate).join(
+        Movement, Exercise.movement_id == Movement.id,
+    ).where(WorkoutTemplate.user_id == user_id, WorkoutTemplate.active.is_(True),
+            Exercise.active.is_(True), Movement.kind == "strength")))
+    selected = {(slot_id(e), history_id(e), e.movement_id, "strength") for e in active if e.movement_id}
     for session in completed_new(db, user_id):
         if session.phase_type != "accumulation":
             continue
         for item in session.exercises:
             sets = [r for r in item.results if r.is_working and r.rir_reported is not None]
-            if item.is_anchor and sets:
-                by_slot[item.exercise_id].append((float(sets[0].weight), mean(r.reps for r in sets)))
+            key = snapshot_key(item)
+            if item.is_anchor and sets and key in selected:
+                by_slot[key].append((float(sets[0].weight), mean(r.reps for r in sets)))
     return any(len(rows) >= 4 and len({weight for weight, _ in rows[-4:]}) == 1
                and all(rows[-i][1] < rows[-i-1][1] for i in (1, 2, 3))
                for rows in by_slot.values())
@@ -159,12 +166,14 @@ def resolve_week(db: Session, user_id: int, on_date: date) -> TrainingWeek:
 
 
 def latest_accumulation(db: Session, exercise_id: str) -> list[SessionExercise]:
-    return list(db.scalars(select(SessionExercise).join(WorkoutSession).where(
-        SessionExercise.exercise_id == exercise_id,
+    exercise = db.get(Exercise, exercise_id)
+    if exercise is None:
+        return []
+    return list(db.scalars(comparable_history(db, exercise).where(
         WorkoutSession.status == "completed",
         WorkoutSession.phase_type == "accumulation",
         SessionExercise.skipped.is_(False),
-    ).order_by(WorkoutSession.completed_at.desc()).limit(3)))
+    ).order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).limit(3)))
 
 
 def prescription(db: Session, exercise: Exercise, week: TrainingWeek, reentry: bool) -> tuple[float, int, str]:
@@ -211,7 +220,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
             limit = 8 if deload else targets.get(group, [12, 18, default_cap])[2]
             candidates = sorted((e for e in exercises if movements[e.id].primary_group == group
                                  or group in split_details(movements[e.id].secondary_groups)),
-                                key=lambda e: (movements[e.id].is_anchor, -counts[e.id], e.id))
+                                 key=lambda e: (movements[e.id].is_anchor, -counts[e.id], slot_id(e)))
             while volume(group) > limit and any(counts[e.id] > 1 for e in candidates):
                 candidate = next(e for e in candidates if counts[e.id] > 1)
                 counts[candidate.id] -= 1
@@ -243,10 +252,12 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
     if (stats["avg_rir"] is None or stats["avg_rir"] < 1 or declining_anchor(db, user_id)
             or any(t.id not in completed_templates for t in templates)):
         return enforce_limits()
+    selected_ids = {(slot_id(e), history_id(e), e.movement_id, "strength"): e.id for e in exercises}
     for session in stats["sessions"]:
         for item in session.exercises:
-            if item.exercise_id in counts and not item.skipped:
-                counts[item.exercise_id] = item.sets_count
+            current_id = selected_ids.get(snapshot_key(item))
+            if current_id is not None and not item.skipped:
+                counts[current_id] = item.sets_count
     by_group = defaultdict(list)
     for e in exercises:
         movement = movements[e.id]
@@ -254,7 +265,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
             by_group[movement.primary_group].append((e, movement))
     for group, options in by_group.items():
         cap = targets.get(group, [12, 18, default_cap])[2]
-        options.sort(key=lambda pair: (not pair[1].is_anchor, pair[0].position, pair[0].id))
+        options.sort(key=lambda pair: (not pair[1].is_anchor, pair[0].position, slot_id(pair[0])))
         if volume(group) < cap:
             candidate = options[(week.week_number - 2) % len(options)][0]
             counts[candidate.id] = min(12, counts[candidate.id] + 1)
@@ -286,6 +297,12 @@ def next_set_suggestion(item: SessionExercise, step: float) -> dict | None:
 
 
 def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date) -> WorkoutSession | None:
+    template = db.scalar(select(WorkoutTemplate).where(
+        WorkoutTemplate.id == template.id, WorkoutTemplate.active.is_(True),
+    ).with_for_update().execution_options(populate_existing=True))
+    if template is None:
+        return None
+    db.expire(template, ["exercises"])
     week = resolve_week(db, template.user_id, on_date)
     if week.phase_type == "vacation":
         return None
@@ -319,6 +336,7 @@ def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date)
         db.add(SessionExercise(session_id=session.id, exercise_id=e.id,
             movement_id=movement.id, name=movement.name, position=e.position,
             kind=movement.kind, target_duration_minutes=e.duration_minutes if timed else None,
+            weight_step=None if timed else e.weight_step,
             sets_count=0 if timed else counts[e.id], target_weight=weight, target_reps=reps,
             min_reps=0 if timed else (e.rep_min or e.medium_min), max_reps=0 if timed else (e.rep_max or e.medium_max),
             target_rir=None if timed else (2.5 if reentry else week.target_rir),

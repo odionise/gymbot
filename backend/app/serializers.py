@@ -1,16 +1,18 @@
 from .models import Exercise, Movement, SessionExercise, WorkoutSession, WorkoutTemplate
+from .history import history_id, slot_id
 from .muscles import split_details
 from .planning import PHASES, next_set_suggestion
 
 
-def movement_dict(item: Movement) -> dict:
+def movement_dict(item: Movement, is_used: bool = False) -> dict:
     return {"id": item.id, "name": item.name, "kind": item.kind, "primary_group": item.primary_group,
-            "secondary_groups": split_details(item.secondary_groups), "is_anchor": item.is_anchor}
+            "secondary_groups": split_details(item.secondary_groups), "is_anchor": item.is_anchor, "is_used": is_used}
 
 
 def exercise_dict(item: Exercise) -> dict:
     return {
-        "id": item.id, "name": item.name, "position": item.position,
+        "id": item.id, "slot_id": slot_id(item), "history_id": history_id(item),
+        "name": item.name, "position": item.position,
         "sets_count": item.sets_count, "medium_weight": float(item.medium_weight),
         "weight_step": float(item.weight_step), "light_factor": float(item.light_factor),
         "heavy_factor": float(item.heavy_factor), "light_min": item.light_min,
@@ -33,7 +35,7 @@ def template_dict(item: WorkoutTemplate) -> dict:
 
 
 def session_exercise_dict(item: SessionExercise) -> dict:
-    step = float(item.exercise.weight_step)
+    step = float(item.weight_step) if item.weight_step is not None else None
     return {
         "id": item.id, "exercise_id": item.exercise_id, "name": item.name,
         "kind": item.kind, "target_duration_minutes": item.target_duration_minutes,
@@ -46,7 +48,7 @@ def session_exercise_dict(item: SessionExercise) -> dict:
         "movement_id": item.movement_id, "primary_group": item.primary_group,
         "secondary_groups": split_details(item.secondary_groups), "is_anchor": item.is_anchor,
         "target_rir": float(item.target_rir) if item.target_rir is not None else None,
-        "action_label": item.action_label, "next_set": next_set_suggestion(item, step),
+        "action_label": item.action_label, "next_set": next_set_suggestion(item, step) if step is not None else None,
         "results": [
             {"set_index": result.set_index, "weight": float(result.weight), "reps": result.reps,
              "rir_reported": float(result.rir_reported) if result.rir_reported is not None else None,

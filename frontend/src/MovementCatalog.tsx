@@ -1,11 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from './api'
 import { ChoiceDropdown } from './ChoiceDropdown'
 import { filterMovements, normalizeMovementSearch } from './movementSearch'
-import type { Movement } from './types'
+import type { Movement, MovementInput } from './types'
 
-type MovementInput = Omit<Movement, 'id'>
 export const movementKinds = { strength: 'Силовое', cardio: 'Кардио', stretch: 'Растяжка', other_timed: 'Другое на время' } as const
 export const timedOptions = [{ value: 'kind:cardio', label: 'Кардио' }, { value: 'kind:stretch', label: 'Растяжка' }, { value: 'kind:other_timed', label: 'Другое на время' }]
 
@@ -18,15 +17,17 @@ function MovementForm({ movement, muscles, initialMuscle, initialKind = 'strengt
   const [primary, setPrimary] = useState(movement?.primary_group ?? initialMuscle)
   const [secondary, setSecondary] = useState(movement?.secondary_groups ?? [])
   const [anchor, setAnchor] = useState(movement?.is_anchor ?? false)
+  useEffect(() => { if (movement?.is_used) setKind(movement.kind) }, [movement?.id, movement?.kind, movement?.is_used])
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!name.trim() || (kind === 'strength' && !primary)) return
     await onSave({ name: name.trim(), kind, primary_group: kind === 'strength' ? primary : 'Не применяется', secondary_groups: kind === 'strength' ? secondary : [], is_anchor: kind === 'strength' && anchor })
   }
   return <form className="catalogEditor" onSubmit={submit}>
-    <div className="editorTitle"><h3>{movement ? 'Изменить упражнение' : 'Новое упражнение'}</h3><button type="button" onClick={onClose} aria-label="Закрыть редактор">×</button></div>
+    <div className="editorTitle"><h3>{movement ? 'Изменить запись справочника' : 'Новое упражнение'}</h3><button type="button" onClick={onClose} aria-label="Закрыть редактор">×</button></div>
     <label className="field"><span>Название</span><input required maxLength={120} value={name} onChange={event => setName(event.target.value)} /></label>
-    <ChoiceDropdown label="Тип упражнения" value={kind} options={Object.entries(movementKinds).map(([value, label]) => ({ value, label }))} onChange={value => setKind(value as Movement['kind'])} />
+    {movement?.is_used ? <p className="fieldHelp">Тип: {movementKinds[kind]}. Это движение уже использовано в программе или истории. Для другого типа создайте новое движение и выберите «Заменить упражнение».</p> : <ChoiceDropdown label="Тип упражнения" value={kind} options={Object.entries(movementKinds).map(([value, label]) => ({ value, label }))} onChange={value => setKind(value as Movement['kind'])} />}
+    {movement && <p className="fieldHelp">Название здесь исправляет запись справочника. Для другого движения используйте замену в программе; старые тренировки сохраняют прежние названия.</p>}
     {kind === 'strength' && <>
     <ChoiceDropdown label="Основная мышца" value={primary} options={muscles.map(group => ({ value: group, label: group }))} placeholder="Выберите мышцу" onChange={value => { setPrimary(value); setSecondary(secondary.filter(group => group !== value)) }} />
     <ChoiceDropdown label="Вторичные мышцы" value="" options={muscles.filter(group => group !== primary && !secondary.includes(group)).map(group => ({ value: group, label: group }))} placeholder="Добавить вторичную" onChange={value => setSecondary([...secondary, value])} />

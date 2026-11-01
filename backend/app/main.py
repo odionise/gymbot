@@ -7,7 +7,8 @@ from aiogram import Bot
 from aiogram.types import Update
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .analytics import progress_for_user
@@ -16,10 +17,11 @@ from .bot import dispatcher, reminder_loop
 from .config import get_settings
 from .db import Base, engine, get_db
 from .migrations import migrate
-from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, utcnow
+from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, new_id, utcnow
+from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used
 from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS
 from .planning import get_or_create_session, monday, movement_for, planned_counts, prescription, resolve_week
-from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, RescheduleIn, ResultIn, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
+from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
 
@@ -82,6 +84,35 @@ def owned_movement(db: Session, user: User, movement_id: str) -> Movement:
     item = db.get(Movement, movement_id)
     if not item or item.user_id != user.telegram_id or not item.active:
         raise HTTPException(404, "Movement not found")
+    return item
+
+
+def current_exercise(db: Session, user: User, exercise_id: str, lock: bool = False) -> Exercise:
+    item = db.get(Exercise, exercise_id)
+    if item is None:
+        raise HTTPException(404, "Упражнение не найдено")
+    owned_template(db, user, item.template_id)
+    if lock:
+        template = db.scalar(select(WorkoutTemplate).where(
+            WorkoutTemplate.id == item.template_id, WorkoutTemplate.user_id == user.telegram_id,
+            WorkoutTemplate.active.is_(True),
+        ).with_for_update().execution_options(populate_existing=True))
+        if template is None:
+            raise HTTPException(404, "Тренировочный день уже удалён")
+        item = db.scalar(select(Exercise).where(Exercise.id == exercise_id)
+                         .with_for_update().execution_options(populate_existing=True))
+    if not item.active:
+        raise HTTPException(409, "Назначение уже изменено. Обновите программу перед повторным действием.")
+    return item
+
+
+def locked_movement(db: Session, user: User, movement_id: str) -> Movement:
+    owned_movement(db, user, movement_id)
+    item = db.scalar(select(Movement).where(
+        Movement.id == movement_id, Movement.user_id == user.telegram_id, Movement.active.is_(True),
+    ).with_for_update().execution_options(populate_existing=True))
+    if item is None:
+        raise HTTPException(404, "Движение уже удалено")
     return item
 
 
@@ -170,7 +201,7 @@ def update_muscle_target(group: str, data: MuscleTargetIn, user: User = Depends(
 
 @app.get("/api/movements")
 def movements(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return [movement_dict(item) for item in db.scalars(select(Movement).where(
+    return [movement_dict(item, movement_is_used(db, item.id)) for item in db.scalars(select(Movement).where(
         Movement.user_id == user.telegram_id, Movement.active.is_(True)).order_by(Movement.name))]
 
 
@@ -190,7 +221,10 @@ def create_movement(data: MovementIn, user: User = Depends(current_user), db: Se
 
 @app.put("/api/movements/{movement_id}")
 def update_movement(movement_id: str, data: MovementIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    item = owned_movement(db, user, movement_id)
+    item = locked_movement(db, user, movement_id)
+    used = movement_is_used(db, item.id)
+    if used and data.kind != item.kind:
+        raise HTTPException(409, "Тип использованного движения менять нельзя. Создайте другое движение и замените упражнение в программе.")
     if data.is_anchor:
         for old in db.scalars(select(Movement).where(Movement.user_id == user.telegram_id,
                                                     Movement.primary_group == data.primary_group,
@@ -199,7 +233,7 @@ def update_movement(movement_id: str, data: MovementIn, user: User = Depends(cur
     item.name, item.kind, item.primary_group = data.name, data.kind, data.primary_group
     item.secondary_groups, item.is_anchor = ", ".join(data.secondary_groups), data.is_anchor
     db.commit()
-    return movement_dict(item)
+    return movement_dict(item, used)
 
 
 @app.get("/api/templates")
@@ -239,13 +273,20 @@ def delete_template(template_id: str, user: User = Depends(current_user), db: Se
 @app.post("/api/templates/{template_id}/exercises")
 def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     owned_template(db, user, template_id)
+    template = db.scalar(select(WorkoutTemplate).where(
+        WorkoutTemplate.id == template_id, WorkoutTemplate.user_id == user.telegram_id,
+        WorkoutTemplate.active.is_(True),
+    ).with_for_update().execution_options(populate_existing=True))
+    if template is None:
+        raise HTTPException(404, "Тренировочный день уже удалён")
     if not data.movement_id:
         raise HTTPException(422, "Choose a movement and its muscle groups")
-    movement = owned_movement(db, user, data.movement_id)
+    movement = locked_movement(db, user, data.movement_id)
     if movement.kind != "strength" and data.duration_minutes is None:
         raise HTTPException(422, "Укажите длительность в минутах")
     data.name = movement.name
-    item = Exercise(template_id=template_id, **data.model_dump())
+    identity = new_id()
+    item = Exercise(id=identity, slot_id=identity, history_id=identity, template_id=template_id, **data.model_dump())
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -254,23 +295,105 @@ def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(cur
 
 @app.put("/api/exercises/{exercise_id}")
 def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    item = owned_exercise(db, user, exercise_id)
-    movement = owned_movement(db, user, data.movement_id or item.movement_id)
+    item = current_exercise(db, user, exercise_id, lock=True)
+    if data.movement_id is not None and data.movement_id != item.movement_id:
+        raise HTTPException(409, "Для другого движения используйте действие «Заменить упражнение».")
+    movement = locked_movement(db, user, data.movement_id or item.movement_id)
     if movement.kind != "strength" and data.duration_minutes is None:
         raise HTTPException(422, "Укажите длительность в минутах")
     data.name = movement.name
-    for key, value in data.model_dump().items():
-        setattr(item, key, value)
+    values = data.model_dump()
+    values["movement_id"] = movement.id
+    changed = db.execute(update(Exercise).where(Exercise.id == item.id, Exercise.active.is_(True)).values(**values))
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Назначение уже изменено. Обновите программу.")
     db.commit()
     return exercise_dict(item)
 
 
 @app.delete("/api/exercises/{exercise_id}")
 def delete_exercise(exercise_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    item = owned_exercise(db, user, exercise_id)
-    item.active = False
+    item = current_exercise(db, user, exercise_id, lock=True)
+    changed = db.execute(update(Exercise).where(Exercise.id == item.id, Exercise.active.is_(True)).values(active=False))
+    if changed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(409, "Назначение уже изменено. Обновите программу.")
     db.commit()
     return {"ok": True}
+
+
+@app.get("/api/exercises/{exercise_id}/history-options")
+def history_options(exercise_id: str, movement_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    item = current_exercise(db, user, exercise_id)
+    movement = owned_movement(db, user, movement_id)
+    return available_history(db, item, movement)
+
+
+@app.post("/api/exercises/{exercise_id}/replace")
+def replace_exercise(exercise_id: str, data: ReplacementIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    item = current_exercise(db, user, exercise_id, lock=True)
+    movement = locked_movement(db, user, data.movement_id)
+    settings = data.settings.model_dump(exclude_none=True)
+    strength_fields = {"sets_count", "medium_weight", "weight_step", "rep_min", "rep_max"}
+    if movement.kind == "strength":
+        if set(settings) != strength_fields:
+            raise HTTPException(422, "Подтвердите стартовый вес, шаг, подходы и диапазон повторов; минуты для силового упражнения не нужны.")
+    elif set(settings) != {"duration_minutes"}:
+        raise HTTPException(422, "Для упражнения на время укажите только длительность в минутах.")
+    chosen_history = None
+    if data.history_mode == "resume":
+        owned_base = db.scalar(select(Exercise).join(WorkoutTemplate).where(
+            WorkoutTemplate.user_id == user.telegram_id,
+            func.coalesce(Exercise.history_id, Exercise.id) == data.history_id,
+        ).limit(1))
+        if owned_base is None:
+            raise HTTPException(404, "База результатов не найдена")
+        choices = available_history(db, item, movement)["options"]
+        if not any(option["history_id"] == data.history_id for option in choices):
+            raise HTTPException(409, "Эту базу нельзя продолжить: нужны достоверные результаты того же движения в этом месте программы.")
+        chosen_history = data.history_id
+        if item.movement_id == movement.id and exercise_history_id(item) == chosen_history:
+            raise HTTPException(409, "Эта база уже выбрана. Для изменения параметров откройте настройки.")
+    identity = new_id()
+    timed = movement.kind != "strength"
+    replacement = Exercise(
+        id=identity, template_id=item.template_id, position=item.position,
+        slot_id=slot_id(item), history_id=chosen_history or identity,
+        movement_id=movement.id, name=movement.name,
+        sets_count=3 if timed else settings["sets_count"],
+        medium_weight=0 if timed else settings["medium_weight"],
+        weight_step=2.5 if timed else settings["weight_step"],
+        rep_min=None if timed else settings["rep_min"], rep_max=None if timed else settings["rep_max"],
+        medium_min=8 if timed else settings["rep_min"], medium_max=12 if timed else settings["rep_max"],
+        rir_target=2, duration_minutes=settings["duration_minutes"] if timed else None,
+    )
+    preserved = db.scalar(select(func.count(func.distinct(SessionExercise.session_id))).join(
+        WorkoutSession, SessionExercise.session_id == WorkoutSession.id,
+    ).where(SessionExercise.exercise_id == item.id, WorkoutSession.user_id == user.telegram_id,
+            WorkoutSession.template_id == item.template_id))
+    try:
+        # Conditional retirement plus a unique active-slot index prevents a lost
+        # response or a concurrent request from creating a second replacement.
+        changed = db.execute(update(Exercise).where(
+            Exercise.id == item.id, Exercise.active.is_(True),
+        ).values(active=False))
+        if changed.rowcount != 1:
+            db.rollback()
+            raise HTTPException(409, "Назначение уже заменено. Обновите программу.")
+        db.add(replacement)
+        db.commit()
+    except (IntegrityError, OperationalError) as exc:
+        db.rollback()
+        if isinstance(exc, OperationalError):
+            if db.bind.dialect.name != "sqlite" or not any(
+                    reason in str(exc.orig).lower() for reason in ("locked", "busy")):
+                raise
+        raise HTTPException(409, "Программа одновременно изменилась. Обновите её и проверьте результат.") from exc
+    # In-process callers may retain the template relationship across requests.
+    db.expire(db.get(WorkoutTemplate, replacement.template_id), ["exercises"])
+    return {"exercise": exercise_dict(replacement), "history_mode": data.history_mode,
+            "effective_from": "next_new_session", "preserved_sessions_count": preserved}
 
 
 @app.get("/api/sessions/today")
@@ -454,6 +577,15 @@ def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current
         raise HTTPException(422, "Invalid date")
     if new_date == session.scheduled_date:
         return session_dict(session, db.get(WorkoutTemplate, session.template_id))
+    template = db.scalar(select(WorkoutTemplate).where(WorkoutTemplate.id == session.template_id)
+                         .with_for_update().execution_options(populate_existing=True))
+    for item in session.exercises:
+        exercise = db.scalar(select(Exercise).where(Exercise.id == item.exercise_id)
+                             .execution_options(populate_existing=True))
+        movement = db.get(Movement, exercise.movement_id) if exercise and exercise.movement_id else None
+        if (not template.active or exercise is None or not exercise.active
+                or item.movement_id != exercise.movement_id or (movement and item.kind != movement.kind)):
+            raise HTTPException(409, "В занятии есть уже заменённое назначение. Его можно записать и завершить; перенос после замены пока недоступен.")
     if db.scalar(select(WorkoutSession).where(WorkoutSession.template_id == session.template_id,
                                               WorkoutSession.scheduled_date == new_date)):
         raise HTTPException(409, "Workout already exists on that date")

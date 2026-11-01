@@ -1,20 +1,19 @@
 """Migrate a complete synthetic legacy graph twice, including real PostgreSQL."""
 
-import os
+import json
 from datetime import date, datetime, timezone
-from uuid import uuid4
 
 import pytest
-from sqlalchemy import Column, ForeignKey, MetaData, Table, UniqueConstraint, create_engine, inspect, select, text
-from sqlalchemy.engine import make_url
+from sqlalchemy import Column, ForeignKey, Index, MetaData, Table, UniqueConstraint, inspect, select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.db import Base, make_engine
 from app.main import history
 from app.migrations import migrate
-from app.models import User
+from app.models import Exercise, User
 
-# Column contract from the original models at 8745307 (before migrations 1–4).
+# Column contract from the original models at 8745307 (before migrations 1–5).
 # Types and FK targets for these unchanged legacy fields come from the models.
 LEGACY_COLUMNS = {
     "users": "telegram_id chat_id timezone created_at",
@@ -37,30 +36,7 @@ def legacy_engine(request, tmp_path):
             engine.dispose()
         return
 
-    raw_url = os.environ.get("GYMBOT_TEST_POSTGRES_URL")
-    if not raw_url:
-        pytest.skip("Set GYMBOT_TEST_POSTGRES_URL for a disposable loopback gymbot_test database")
-    url = make_url(raw_url)
-    if (url.get_backend_name() != "postgresql" or url.host not in ("127.0.0.1", "localhost")
-            or url.database != "gymbot_test"):
-        pytest.fail("PostgreSQL checks accept only a loopback database named gymbot_test", pytrace=False)
-
-    # Each test owns one generated schema. No public or pre-existing schema is
-    # migrated or dropped, even if other developers share the local test server.
-    schema = "gymbot_stage0_" + uuid4().hex
-    admin = create_engine(url)
-    with admin.begin() as connection:
-        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
-    try:
-        yield engine
-    finally:
-        engine.dispose()
-        try:
-            with admin.begin() as connection:
-                connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        finally:
-            admin.dispose()
+    yield request.getfixturevalue("postgres_engine")
 
 
 def seed_legacy(engine):
@@ -77,7 +53,12 @@ def seed_legacy(engine):
             ))
         unique = [UniqueConstraint(*(column.name for column in constraint.columns))
                   for constraint in source.constraints if isinstance(constraint, UniqueConstraint)]
-        Table(table_name, metadata, *columns, *unique)
+        target = Table(table_name, metadata, *columns, *unique)
+        # Retain the original indexes on legacy columns; the new slot/history
+        # indexes do not belong to the pre-progression schema.
+        for index in source.indexes:
+            if all(column.name in target.c for column in index.columns):
+                Index(index.name, *(target.c[column.name] for column in index.columns), unique=index.unique)
     metadata.create_all(engine)
     moment = datetime(2026, 10, 19, 12, tzinfo=timezone.utc)
     with engine.begin() as connection:
@@ -122,21 +103,155 @@ def legacy_rows(engine, metadata):
         )] for table in metadata.sorted_tables}
 
 
-def test_complete_legacy_graph_survives_migration_and_reapplication(legacy_engine):
+def normalized(value):
+    if isinstance(value, dict):
+        return tuple(sorted((key, normalized(item)) for key, item in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(normalized(item) for item in value)
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    return str(value)
+
+
+def index_signature(engine):
+    inspector = inspect(engine)
+    return {name: tuple(normalized(item) for item in sorted(inspector.get_indexes(name), key=lambda item: item["name"]))
+            for name in inspector.get_table_names()}
+
+
+def schema_signature(engine):
+    inspector = inspect(engine)
+    return {name: {
+        "columns": tuple((column["name"], str(column["type"]), getattr(column["type"], "timezone", None),
+                          column["nullable"], normalized(column.get("default")), normalized(column.get("computed")),
+                          normalized(column.get("identity"))) for column in inspector.get_columns(name)),
+        "primary_key": normalized(inspector.get_pk_constraint(name)),
+        "foreign_keys": tuple(sorted((normalized(item) for item in inspector.get_foreign_keys(name)), key=str)),
+        "unique": tuple(sorted((normalized(item) for item in inspector.get_unique_constraints(name)), key=str)),
+        "checks": tuple(sorted((normalized(item) for item in inspector.get_check_constraints(name)), key=str)),
+    } for name in inspector.get_table_names()}
+
+
+def save_sql_backup(engine, metadata, path):
+    """A recoverable SQL backup of these synthetic tables, before migration."""
+    statements = [str(CreateTable(table).compile(dialect=engine.dialect))
+                  for table in metadata.sorted_tables]
+    with engine.connect() as connection:
+        for table in metadata.sorted_tables:
+            for row in connection.execute(select(table).order_by(*table.primary_key.columns)).mappings():
+                statements.append(str(table.insert().values(**dict(row)).compile(
+                    dialect=engine.dialect, compile_kwargs={"literal_binds": True},
+                )))
+    for table in metadata.sorted_tables:
+        for index in sorted(table.indexes, key=lambda item: item.name or ""):
+            statements.append(str(CreateIndex(index).compile(dialect=engine.dialect)))
+    path.write_text(json.dumps(statements, ensure_ascii=False), encoding="utf-8")
+
+
+def restore_sql_backup(engine, path):
+    # Both engines are freshly created test resources; PostgreSQL uses only its
+    # generated schema. No public/pre-existing schema or external data is touched.
+    Base.metadata.drop_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS schema_versions"))
+        for statement in json.loads(path.read_text(encoding="utf-8")):
+            connection.exec_driver_sql(statement)
+
+
+def test_complete_legacy_graph_survives_migration_and_reapplication(legacy_engine, tmp_path):
     metadata = seed_legacy(legacy_engine)
     before = legacy_rows(legacy_engine, metadata)
+    schema_before, indexes_before = schema_signature(legacy_engine), index_signature(legacy_engine)
+    assert any(indexes_before.values())
+    backup_path = tmp_path / "synthetic-legacy-backup.sql.json"
+    save_sql_backup(legacy_engine, metadata, backup_path)
     for _ in range(2):
         migrate(legacy_engine)
         assert legacy_rows(legacy_engine, metadata) == before
         with legacy_engine.connect() as connection:
-            assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4]
+            assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5]
             assert list(connection.execute(text("SELECT rir_reported, rir_target FROM set_results"))) == [(None, None), (None, None)]
             assert connection.execute(text("SELECT movement_id FROM session_exercises")).scalar() is None
             assert connection.execute(text("SELECT actual_date FROM workout_sessions")).scalar() is None
             assert connection.execute(text("SELECT SUM(weight * reps) FROM set_results")).scalar() == 875
+            assert tuple(connection.execute(text("SELECT slot_id, history_id FROM exercises")).one()) == ("legacy-exercise", "legacy-exercise")
+            assert connection.execute(text("SELECT weight_step FROM session_exercises")).scalar() is None
         assert "duration_minutes" in {column["name"] for column in inspect(legacy_engine).get_columns("exercises")}
         with Session(legacy_engine) as db:
             recorded = history(db.get(User, 9001), db)
             assert len(recorded) == 1
             assert recorded[0]["exercises"][0]["name"] == "Историческое название"
             assert [row["weight"] for row in recorded[0]["exercises"][0]["results"]] == [50, 47.5]
+    restore_sql_backup(legacy_engine, backup_path)
+    assert legacy_rows(legacy_engine, metadata) == before
+    assert schema_signature(legacy_engine) == schema_before
+    assert index_signature(legacy_engine) == indexes_before
+    assert "schema_versions" not in inspect(legacy_engine).get_table_names()
+    assert "slot_id" not in {column["name"] for column in inspect(legacy_engine).get_columns("exercises")}
+    for _ in range(2):
+        migrate(legacy_engine)
+        assert legacy_rows(legacy_engine, metadata) == before
+
+
+def test_version_four_upgrade_preserves_existing_facts_and_unknown_step(legacy_engine, tmp_path):
+    from app.main import create_exercise, update_exercise
+    from app.planning import get_or_create_session
+    from app.schemas import ExerciseIn
+    from app.serializers import exercise_dict
+    from test_history import START, finish, program
+
+    migrate(legacy_engine)
+    with Session(legacy_engine, expire_on_commit=False) as db:
+        user, template, source_id = program(db)
+        # These are real current-format rows first; removing only the three new
+        # columns below gives a faithful v4 shape without fabricated old values.
+        source = db.get(Exercise, source_id)
+        session = get_or_create_session(db, template, START)
+        finish(db, user, session)
+        values = exercise_dict(source)
+        for field in ("id", "slot_id", "history_id"):
+            values.pop(field, None)
+        values["weight_step"] = 5
+        update_exercise(source_id, ExerciseIn(**values), user, db)
+        create_exercise(template.id, ExerciseIn(name="Ещё одно место", movement_id=source.movement_id,
+                                                position=4, medium_weight=30), user, db)
+    dialect = legacy_engine.dialect.identifier_preparer
+    indexes = [item["name"] for item in inspect(legacy_engine).get_indexes("exercises")
+               if {"slot_id", "history_id"}.intersection(item["column_names"])]
+    with legacy_engine.begin() as connection:
+        for index in indexes:
+            connection.execute(text("DROP INDEX " + dialect.quote(index)))
+        connection.execute(text("ALTER TABLE exercises DROP COLUMN slot_id"))
+        connection.execute(text("ALTER TABLE exercises DROP COLUMN history_id"))
+        connection.execute(text("ALTER TABLE session_exercises DROP COLUMN weight_step"))
+        connection.execute(text("DELETE FROM schema_versions WHERE version = 5"))
+    backup_metadata = MetaData()
+    backup_metadata.reflect(legacy_engine)
+    complete_before = legacy_rows(legacy_engine, backup_metadata)
+    schema_before, indexes_before = schema_signature(legacy_engine), index_signature(legacy_engine)
+    assert any(indexes_before.values())
+    backup_path = tmp_path / "synthetic-v4-backup.sql.json"
+    save_sql_backup(legacy_engine, backup_metadata, backup_path)
+    old_metadata = MetaData()
+    for table in backup_metadata.sorted_tables:
+        if table.name != "schema_versions":
+            table.to_metadata(old_metadata)
+    before = legacy_rows(legacy_engine, old_metadata)
+    for phase in ("upgrade", "restored-upgrade"):
+        if phase == "restored-upgrade":
+            restore_sql_backup(legacy_engine, backup_path)
+            assert legacy_rows(legacy_engine, backup_metadata) == complete_before
+            assert schema_signature(legacy_engine) == schema_before
+            assert index_signature(legacy_engine) == indexes_before
+            assert "slot_id" not in {column["name"] for column in inspect(legacy_engine).get_columns("exercises")}
+        for _ in range(2):
+            migrate(legacy_engine)
+            assert legacy_rows(legacy_engine, old_metadata) == before
+            with legacy_engine.connect() as connection:
+                rows = connection.execute(text("SELECT id, slot_id, history_id FROM exercises")).all()
+                assert len(rows) == 2
+                assert all(identity == slot == history_id for identity, slot, history_id in rows)
+                assert connection.execute(text("SELECT weight_step FROM session_exercises")).scalar() is None
+                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5]
+            assert any(item["unique"] and item["column_names"] == ["slot_id"]
+                       for item in inspect(legacy_engine).get_indexes("exercises"))

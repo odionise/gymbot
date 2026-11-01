@@ -23,7 +23,7 @@ export function ExerciseStrengthTable({ exercises }: { exercises: Exercise[] }) 
       }
     }
     let baseline: number | null = null
-    return { id: item.id, name: item.name, cells: weeks.map(week => {
+    return { id: item.id, name: item.label ?? item.name, cells: weeks.map(week => {
       const cell = cells.get(week)
       if (!cell) return { week, value: null, tone: 'empty' }
       if (cell.light) return { week, value: cell.value, tone: 'light' }

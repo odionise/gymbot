@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -34,11 +34,14 @@ class WorkoutTemplate(Base):
     send_time: Mapped[str] = mapped_column(String(5), default="09:00")
     next_phase: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    exercises: Mapped[list["Exercise"]] = relationship(back_populates="template", order_by="Exercise.position")
+    exercises: Mapped[list["Exercise"]] = relationship(back_populates="template", order_by=lambda: (Exercise.position, func.coalesce(Exercise.slot_id, Exercise.id)))
 
 
 class Exercise(Base):
     __tablename__ = "exercises"
+    __table_args__ = (Index("uq_exercises_active_slot", "slot_id", unique=True,
+                           sqlite_where=text("active AND slot_id IS NOT NULL"),
+                           postgresql_where=text("active AND slot_id IS NOT NULL")),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     template_id: Mapped[str] = mapped_column(ForeignKey("workout_templates.id"), index=True)
     name: Mapped[str] = mapped_column(String(120))
@@ -60,6 +63,9 @@ class Exercise(Base):
     rep_max: Mapped[int | None] = mapped_column(Integer)
     rir_target: Mapped[float | None] = mapped_column(Numeric(3, 1))
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    # Immutable identities: order can change, a replacement always gets a new id.
+    slot_id: Mapped[str | None] = mapped_column(String(36))
+    history_id: Mapped[str | None] = mapped_column(String(36), index=True)
     template: Mapped[WorkoutTemplate] = relationship(back_populates="exercises")
     movement: Mapped["Movement | None"] = relationship()
 
@@ -164,6 +170,7 @@ class SessionExercise(Base):
     kind: Mapped[str] = mapped_column(String(16), default="strength")
     target_duration_minutes: Mapped[int | None] = mapped_column(Integer)
     actual_duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    weight_step: Mapped[float | None] = mapped_column(Numeric(7, 2))
     session: Mapped[WorkoutSession] = relationship(back_populates="exercises")
     exercise: Mapped[Exercise] = relationship()
     results: Mapped[list["SetResult"]] = relationship(back_populates="session_exercise", order_by="SetResult.set_index", cascade="all, delete-orphan")

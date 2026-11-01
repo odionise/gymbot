@@ -69,3 +69,20 @@ def migrate(engine):
                     if name not in existing:
                         connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {specification}"))
             connection.execute(text("INSERT INTO schema_versions (version) VALUES (4)"))
+        if version < 5:
+            inspector.clear_cache()
+            for table, columns in {
+                "exercises": {"slot_id": "VARCHAR(36)", "history_id": "VARCHAR(36)"},
+                "session_exercises": {"weight_step": "NUMERIC(7, 2)"},
+            }.items():
+                existing = {column["name"] for column in inspector.get_columns(table)}
+                for name, specification in columns.items():
+                    if name not in existing:
+                        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {specification}"))
+            # Existing assignment ids are known. A historical equipment step is
+            # not known, and must not be reconstructed from today's settings.
+            connection.execute(text("UPDATE exercises SET slot_id = id WHERE slot_id IS NULL"))
+            connection.execute(text("UPDATE exercises SET history_id = id WHERE history_id IS NULL"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_exercises_active_slot ON exercises (slot_id) WHERE active AND slot_id IS NOT NULL"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exercises_history_id ON exercises (history_id)"))
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (5)"))

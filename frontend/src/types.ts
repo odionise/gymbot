@@ -1,13 +1,17 @@
 export type Phase = 'light' | 'medium' | 'heavy' | 'accumulation' | 'deload'
 
 export interface Movement {
-  id: string; name: string; kind: 'strength' | 'cardio' | 'stretch' | 'other_timed'; primary_group: string; secondary_groups: string[]; is_anchor: boolean
+  id: string; name: string; kind: 'strength' | 'cardio' | 'stretch' | 'other_timed'; primary_group: string; secondary_groups: string[]; is_anchor: boolean; is_used: boolean
 }
+
+export type MovementInput = Omit<Movement, 'id' | 'is_used'>
 
 export interface MuscleTarget { min_sets: number; max_sets: number; cap_sets: number }
 
 export interface Exercise {
   id: string
+  readonly slot_id: string
+  readonly history_id: string
   name: string
   position: number
   sets_count: number
@@ -28,7 +32,38 @@ export interface Exercise {
   duration_minutes: number | null
 }
 
-export type ExerciseInput = Omit<Exercise, 'id'>
+export type ExerciseInput = Omit<Exercise, 'id' | 'slot_id' | 'history_id'>
+
+export interface ExerciseHistoryOption {
+  history_id: string
+  name: string
+  kind: Movement['kind']
+  completed_sessions: number
+  last_completed_date: string | null
+  last_result: { weight: number | null; reps: number | null; duration_minutes: number | null } | null
+}
+
+export interface ExerciseHistoryOptions {
+  movement_id: string
+  options: ExerciseHistoryOption[]
+  excluded_legacy: boolean
+}
+
+export interface ReplacementInput {
+  movement_id: string
+  history_mode: 'new' | 'resume'
+  history_id: string | null
+  settings: {
+    sets_count: number; medium_weight: number; weight_step: number; rep_min: number; rep_max: number
+  } | { duration_minutes: number }
+}
+
+export interface ReplacementResult {
+  exercise: Exercise
+  history_mode: ReplacementInput['history_mode']
+  effective_from: 'next_new_session'
+  preserved_sessions_count: number
+}
 
 export interface Template {
   id: string
@@ -58,7 +93,7 @@ export interface SessionExercise {
   actual_duration_minutes: number | null
   position: number
   sets_count: number
-  weight_step: number
+  weight_step: number | null
   target_weight: number
   target_reps: number
   min_reps: number
@@ -106,7 +141,7 @@ export interface ProgressPoint {
 }
 
 export interface Progress {
-  exercises: { id: string; name: string; group: string; groups: string[]; points: ProgressPoint[] }[]
+  exercises: { id: string; history_id: string; slot_id: string; movement_id: string | null; kind: Movement['kind']; name: string; label?: string; group: string; groups: string[]; points: ProgressPoint[] }[]
   groups: { group: string; cycle_volume: number; strength_change_percent: number | null; sessions: number }[]
   weeks: { week_start: string; group: string; phase: string; deload_reason: string | null; hard_sets: number; working_sets: number; tonnage: number; avg_rir: number | null; avg_reps_hard: number | null; target_low: number; target_high: number; missed_deload: boolean }[]
   signals: string[]

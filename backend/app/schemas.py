@@ -38,7 +38,7 @@ class ExerciseIn(BaseModel):
     position: int = Field(default=0, ge=0)
     sets_count: int = Field(default=3, ge=1, le=12)
     medium_weight: float = Field(default=0, ge=0, le=1000)
-    weight_step: float = Field(default=2.5, gt=0, le=100)
+    weight_step: float = Field(default=2.5, ge=0.01, le=100, multiple_of=0.01)
     light_factor: float = Field(default=0.9, gt=0, le=2)
     heavy_factor: float = Field(default=1.05, gt=0, le=2)
     light_min: int = Field(default=12, ge=1, le=50)
@@ -83,6 +83,38 @@ class MovementIn(BaseModel):
                 len(set(self.secondary_groups)) != len(self.secondary_groups) or
                 any(group not in ALL_DETAILED_GROUPS for group in self.secondary_groups)):
             raise ValueError("Invalid secondary muscle groups")
+        return self
+
+
+class ReplacementSettings(BaseModel):
+    model_config = {"extra": "forbid"}
+    sets_count: int | None = Field(default=None, ge=1, le=12)
+    medium_weight: float | None = Field(default=None, ge=0, le=1000)
+    weight_step: float | None = Field(default=None, ge=0.01, le=100, multiple_of=0.01)
+    rep_min: int | None = Field(default=None, ge=1, le=50)
+    rep_max: int | None = Field(default=None, ge=1, le=50)
+    duration_minutes: int | None = Field(default=None, ge=1, le=600)
+
+    @model_validator(mode="after")
+    def valid_range(self):
+        if self.rep_min is not None and self.rep_max is not None and self.rep_min > self.rep_max:
+            raise ValueError("Минимум повторов не может превышать максимум")
+        return self
+
+
+class ReplacementIn(BaseModel):
+    model_config = {"extra": "forbid"}
+    movement_id: str = Field(min_length=1, max_length=36)
+    history_mode: Literal["new", "resume"]
+    history_id: str | None = None
+    settings: ReplacementSettings
+
+    @model_validator(mode="after")
+    def history_choice(self):
+        if self.history_mode == "resume" and not self.history_id:
+            raise ValueError("Выберите прежнюю базу результатов")
+        if self.history_mode == "new" and self.history_id is not None:
+            raise ValueError("Для новой базы не указывают прежнюю историю")
         return self
 
 

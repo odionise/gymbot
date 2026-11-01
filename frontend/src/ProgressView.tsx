@@ -35,7 +35,7 @@ export function ProgressView() {
   const groupOptions = [{ value: 'all', label: 'Все мышцы' }, ...[...new Set(data?.weeks.map(row => row.group) ?? [])].map(value => ({ value, label: value }))]
   const rows = (data?.weeks ?? []).filter(row => group === 'all' || row.group === group)
   const trendRows = group === 'all' ? combinedWeeks(rows) : rows
-  const exerciseOptions = [{ value: 'all', label: 'Все упражнения' }, ...(data?.exercises ?? []).filter(item => group === 'all' || item.groups.includes(group)).map(item => ({ value: item.id, label: item.name }))]
+  const exerciseOptions = [{ value: 'all', label: 'Все упражнения' }, ...(data?.exercises ?? []).filter(item => group === 'all' || item.groups.includes(group)).map(item => ({ value: item.id, label: item.label ?? item.name }))]
   const points = (data?.exercises ?? []).filter(item => exercise === 'all' || item.id === exercise).flatMap(item => item.points.filter(point => group === 'all' || point.groups.includes(group)))
   const tableExercises = (data?.exercises ?? []).filter(item => (exercise === 'all' || item.id === exercise) && (group === 'all' || item.groups.includes(group)))
   return <><div className="eyebrow">Ваши результаты</div><h1>Прогресс</h1>
@@ -46,7 +46,7 @@ export function ProgressView() {
       <LineGraph rows={trendRows} field="avg_reps_hard" label="Качество: повторы при сопоставимых весе и ПДО" unit="повт." />
       <LineGraph rows={trendRows} field="tonnage" label="Тоннаж рабочих подходов" unit="кг·повт." />
       <LineGraph rows={trendRows} field="avg_rir" label="Средний ПДО" unit="ПДО" />
-      {exercise !== 'all' && <ExerciseTrend points={points} />}
+      {exercise !== 'all' && <ExerciseTrend points={points} label={exerciseOptions.find(item => item.value === exercise)?.label} />}
       <div className="sectionHead"><h2>Сигналы</h2></div>{data.signals.length ? <div className="emptyCard">{data.signals.slice(-8).map((item, index) => <p key={index}>{item}</p>)}</div> : <div className="emptyCard">Пока нет сигналов.</div>}
       <div className="sectionHead"><h2>Расчётный максимум по упражнениям</h2></div><ExerciseStrengthTable exercises={tableExercises} />
     </>}

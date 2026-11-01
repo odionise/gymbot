@@ -1,9 +1,13 @@
-import type { ExerciseInput, Me, Movement, MuscleTarget, NextWeek, Progress, Template, WorkoutSession } from './types'
+import type { Exercise, ExerciseHistoryOptions, ExerciseInput, Me, Movement, MovementInput, MuscleTarget, NextWeek, Progress, ReplacementInput, ReplacementResult, Template, WorkoutSession } from './types'
 
 declare global {
   interface Window {
     Telegram?: { WebApp?: { initData: string; ready: () => void; expand: () => void; setHeaderColor?: (color: string) => void; setBackgroundColor?: (color: string) => void; themeParams?: Record<string, string> } }
   }
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) { super(message) }
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -12,17 +16,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (initData) headers.Authorization = `tma ${initData}`
   else if (devId) headers['X-Dev-User-Id'] = devId
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers: { ...headers, ...(options.headers as Record<string, string> | undefined) },
-  })
+  let response: Response
+  try {
+    response = await fetch(`/api${path}`, {
+      ...options,
+      headers: { ...headers, ...(options.headers as Record<string, string> | undefined) },
+    })
+  } catch (cause) {
+    throw new Error('Не удалось связаться с сервером. Проверьте соединение и повторите.', { cause })
+  }
   if (!response.ok) {
     let message = `Ошибка ${response.status}`
     try {
       const body = await response.json()
       message = typeof body.detail === 'string' ? body.detail : message
     } catch { /* no JSON response */ }
-    throw new Error(message)
+    throw new ApiError(message, response.status)
   }
   return response.json() as Promise<T>
 }
@@ -37,8 +46,8 @@ export const api = {
   muscleTargets: () => request<Record<string, MuscleTarget>>('/muscle-targets'),
   updateMuscleTarget: (group: string, data: MuscleTarget) => request('/muscle-targets/' + encodeURIComponent(group), { method: 'PUT', body: json(data) }),
   movements: () => request<Movement[]>('/movements'),
-  createMovement: (data: Omit<Movement, 'id'>) => request<Movement>('/movements', { method: 'POST', body: json(data) }),
-  updateMovement: (id: string, data: Omit<Movement, 'id'>) => request<Movement>(`/movements/${id}`, { method: 'PUT', body: json(data) }),
+  createMovement: (data: MovementInput) => request<Movement>('/movements', { method: 'POST', body: json(data) }),
+  updateMovement: (id: string, data: MovementInput) => request<Movement>(`/movements/${id}`, { method: 'PUT', body: json(data) }),
   templates: () => request<Template[]>('/templates'),
   createTemplate: (data: { name: string; muscle_group: string; weekday: number; send_time: string }) =>
     request<Template>('/templates', { method: 'POST', body: json(data) }),
@@ -46,9 +55,13 @@ export const api = {
     request<Template>(`/templates/${id}`, { method: 'PUT', body: json(data) }),
   deleteTemplate: (id: string) => request(`/templates/${id}`, { method: 'DELETE' }),
   createExercise: (templateId: string, data: ExerciseInput) =>
-    request(`/templates/${templateId}/exercises`, { method: 'POST', body: json(data) }),
+    request<Exercise>(`/templates/${templateId}/exercises`, { method: 'POST', body: json(data) }),
   updateExercise: (id: string, data: ExerciseInput) =>
-    request(`/exercises/${id}`, { method: 'PUT', body: json(data) }),
+    request<Exercise>(`/exercises/${id}`, { method: 'PUT', body: json(data) }),
+  exerciseHistoryOptions: (id: string, movementId: string) =>
+    request<ExerciseHistoryOptions>(`/exercises/${id}/history-options?movement_id=${encodeURIComponent(movementId)}`),
+  replaceExercise: (id: string, data: ReplacementInput) =>
+    request<ReplacementResult>(`/exercises/${id}/replace`, { method: 'POST', body: json(data) }),
   deleteExercise: (id: string) => request(`/exercises/${id}`, { method: 'DELETE' }),
   today: () => request<WorkoutSession[]>('/sessions/today'),
   start: (id: string) => request<WorkoutSession>(`/templates/${id}/start`, { method: 'POST' }),

@@ -90,6 +90,8 @@ def seed() -> str:
                 )
                 exercise = Exercise(
                     id=demo_id(user_id, "exercise", title, name), template_id=template.id,
+                    slot_id=demo_id(user_id, "exercise", title, name),
+                    history_id=demo_id(user_id, "exercise", title, name),
                     movement_id=movement.id, name=movement.name, position=position,
                     sets_count=base_sets, medium_weight=base_weight, weight_step=step,
                     rep_min=8, rep_max=12, rir_target=2, active=True,
@@ -143,6 +145,7 @@ def seed() -> str:
                             movement_id=movement.id, name=movement.name,
                             position=exercise.position, sets_count=sets_count,
                             target_weight=weight, target_reps=reps,
+                            weight_step=step,
                             min_reps=8, max_reps=12, target_rir=rir,
                             primary_group=movement.primary_group,
                             secondary_groups=movement.secondary_groups,

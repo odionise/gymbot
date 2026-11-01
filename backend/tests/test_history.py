@@ -1,4 +1,4 @@
-"""Synthetic comparison scenarios. Marked regressions intentionally stay red."""
+"""Synthetic comparison scenarios shared by the independent implementations."""
 
 from datetime import date, datetime, timedelta, timezone
 
@@ -8,12 +8,11 @@ from app.analytics import progress_for_user
 from app.main import (
     complete_session, create_exercise, create_movement, create_template,
     delete_exercise, history, manual_deload, next_week_start, save_duration,
-    save_set, session_detail, update_exercise, update_movement,
+    save_set, session_detail, replace_exercise, update_movement,
 )
 from app.models import Exercise, User, WorkoutTemplate
 from app.planning import get_or_create_session
-from app.schemas import DurationIn, ExerciseIn, MovementIn, ResultIn, TemplateIn
-from app.serializers import exercise_dict
+from app.schemas import DurationIn, ExerciseIn, MovementIn, ReplacementIn, ResultIn, TemplateIn
 
 START = date(2026, 10, 26)
 
@@ -37,32 +36,39 @@ def program(db, kind="strength"):
     return user, db.get(WorkoutTemplate, template["id"]), exercise["id"]
 
 
-def replace(db, user, exercise_id, name, kind="strength", weight=20):
-    movement = create_movement(MovementIn(
-        name=name, kind=kind,
-        primary_group="Грудь" if kind == "strength" else "Не применяется",
+def replace(db, user, exercise_id, name, kind="strength", weight=20,
+            movement_id=None, history_mode="new", history_id=None):
+    if movement_id is None:
+        movement_id = create_movement(MovementIn(
+            name=name, kind=kind,
+            primary_group="Грудь" if kind == "strength" else "Не применяется",
+        ), user, db)["id"]
+    settings = ({"sets_count": 2, "medium_weight": weight, "weight_step": 2.5,
+                 "rep_min": 6, "rep_max": 12} if kind == "strength"
+                else {"duration_minutes": 30})
+    response = replace_exercise(exercise_id, ReplacementIn(
+        movement_id=movement_id, history_mode=history_mode,
+        history_id=history_id, settings=settings,
     ), user, db)
-    settings = exercise_dict(db.get(Exercise, exercise_id))
-    settings.pop("id")
-    settings.update(movement_id=movement["id"], name=name, medium_weight=weight,
-                    duration_minutes=30 if kind != "strength" else None)
-    update_exercise(exercise_id, ExerciseIn(**settings), user, db)
-    return movement["id"]
+    db.expire_all()
+    return response["exercise"]["id"]
 
 
 def finish(db, user, session, weight=None):
     # Expire between calls to model separate API requests / DB sessions.
-    item = session.exercises[0]
-    if item.kind == "strength":
-        for index in range(1, item.sets_count + 1):
-            save_set(item.id, index, ResultIn(
-                weight=float(item.target_weight) if weight is None else weight,
-                reps=8, rir_reported=2,
-            ), user, db)
+    for item in list(session.exercises):
+        if item.skipped:
+            continue
+        if item.kind == "strength":
+            for index in range(1, item.sets_count + 1):
+                save_set(item.id, index, ResultIn(
+                    weight=float(item.target_weight) if weight is None else weight,
+                    reps=8, rir_reported=2,
+                ), user, db)
+                db.expire_all()
+        else:
+            save_duration(item.id, DurationIn(minutes=25), user, db)
             db.expire_all()
-    else:
-        save_duration(item.id, DurationIn(minutes=25), user, db)
-        db.expire_all()
     completed = complete_session(session.id, user, db)
     db.expire_all()
     return completed
@@ -103,7 +109,7 @@ def test_strength_timed_strength_roundtrip_does_not_insert_zero_into_weight_base
     with database() as db:
         user, template, exercise_id = program(db)
         finish(db, user, get_or_create_session(db, template, START))
-        replace(db, user, exercise_id, "Временное B", kind="cardio")
+        exercise_id = replace(db, user, exercise_id, "Временное B", kind="cardio")
         clock.set(datetime(2026, 11, 2, 12, tzinfo=timezone.utc))
         finish(db, user, get_or_create_session(db, template, START + timedelta(weeks=1)))
         replace(db, user, exercise_id, "Новое силовое C", weight=30)
@@ -128,14 +134,14 @@ def test_created_workout_keeps_its_snapshot_when_program_and_catalog_change(data
         before = session_detail(session.id, user, db)["exercises"][0]
         replace(db, user, exercise_id, "Движение B", kind="cardio")
         update_movement(before["movement_id"], MovementIn(
-            name="Новое имя в справочнике", kind="other_timed",
+            name="Новое имя в справочнике", kind="strength", primary_group="Грудь",
         ), user, db)
         db.expire_all()
         after = session_detail(session.id, user, db)["exercises"][0]
         stored_fields = (
             "name", "movement_id", "kind", "position", "sets_count", "target_weight",
             "target_reps", "min_reps", "max_reps", "target_rir", "target_duration_minutes",
-            "actual_duration_minutes", "primary_group", "secondary_groups", "results",
+            "actual_duration_minutes", "primary_group", "secondary_groups", "weight_step", "results",
         )
         assert {key: after[key] for key in stored_fields} == {key: before[key] for key in stored_fields}
         assert session_detail(session.id, user, db)["status"] == status

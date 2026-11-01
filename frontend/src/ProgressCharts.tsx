@@ -153,7 +153,7 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
     <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — жёсткие рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : 'Цвет определяется по числу рабочих подходов относительно цели.'}</p></div>
 }
 
-export function ExerciseTrend({ points }: { points: Progress['exercises'][number]['points'] }) {
+export function ExerciseTrend({ points, label }: { points: Progress['exercises'][number]['points']; label?: string }) {
   if (!points.length) return null
   const weekly = new Map<string, { date: string; value: number; phase: string }>()
   for (const point of points) {
@@ -162,5 +162,5 @@ export function ExerciseTrend({ points }: { points: Progress['exercises'][number
     if (!previous || point.reps > previous.value) weekly.set(date, { date, value: point.reps, phase: point.phase })
   }
   const series = [...weekly.values()].sort((a, b) => a.date.localeCompare(b.date))
-  return <LineChart title="Повторения выбранного упражнения" points={series} unit="повт." xAxisLabel="Неделя" note="Показан лучший результат недели; Легкая неделя отмечена серым." />
+  return <LineChart title={label ? `${label} — повторы` : 'Повторения выбранного упражнения'} points={series} unit="повт." xAxisLabel="Неделя" note="Показан лучший результат недели; Легкая неделя отмечена серым." />
 }
