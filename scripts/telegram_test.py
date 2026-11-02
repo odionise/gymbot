@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 from urllib.parse import quote
+from urllib.error import URLError
 from urllib.request import urlopen
 from urllib.request import build_opener, ProxyHandler
 from uuid import uuid4
@@ -212,14 +213,30 @@ async def verify_test_bot(bot, expected_username, prior_state=None):
 
 
 async def register_test_webhook(bot, verified, state, url, secret):
+    from aiogram.exceptions import TelegramBadRequest
+
     if not URL_PATTERN.fullmatch(url):
         raise TestStandError("Refusing a non-test tunnel URL")
-    current = await verify_test_bot(bot, verified["username"], state)
-    if current["bot_id"] != verified["bot_id"]:
-        raise TestStandError("Bot identity changed")
     target = url + "/telegram/webhook"
-    if not await bot.set_webhook(target, secret_token=secret):
-        raise TestStandError("Telegram did not accept the test webhook")
+    # A new Quick Tunnel hostname may reach Telegram's DNS later than ours.
+    # Retry only that rejection, and recheck ownership before every attempt.
+    for attempt in range(7):
+        current = await verify_test_bot(bot, verified["username"], state)
+        if current["bot_id"] != verified["bot_id"]:
+            raise TestStandError("Bot identity changed")
+        try:
+            accepted = await bot.set_webhook(target, secret_token=secret)
+        except TelegramBadRequest as error:
+            if "failed to resolve host" not in error.message.casefold():
+                raise
+            if attempt == 6:
+                raise TestStandError("Telegram could not resolve the test tunnel hostname after 7 attempts") from None
+            print(f"Telegram DNS is not ready; retrying test webhook ({attempt + 1}/7)", flush=True)
+            await asyncio.sleep(5)
+            continue
+        if not accepted:
+            raise TestStandError("Telegram did not accept the test webhook")
+        break
     if (await bot.get_webhook_info()).url != target:
         raise TestStandError("Telegram did not confirm the test webhook")
     return {**verified, "public_url": url, "webhook_url": target}
@@ -393,6 +410,30 @@ def child_environment(root):
     return env
 
 
+def wait_public_health(url, tunnel, timeout=120):
+    if not URL_PATTERN.fullmatch(url):
+        raise TestStandError("Refusing a non-test tunnel health URL")
+    opener = build_opener(ProxyHandler({}))
+    deadline = time.monotonic() + timeout
+    print("Waiting for the public test tunnel to reach the local API...", flush=True)
+    while True:
+        if tunnel.poll() is not None:
+            raise TestStandError("Own HTTPS tunnel exited before becoming reachable; inspect private tunnel.log")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TestStandError(f"Test tunnel did not answer /health within {timeout:g} seconds; no webhook was registered. Inspect private tunnel.log for network/DNS errors")
+        try:
+            with opener.open(url + "/health", timeout=min(5, remaining)) as response:
+                body = json.load(response)
+                if response.status == 200 and isinstance(body, dict) and body.get("ok") is True:
+                    return
+        except (OSError, URLError, ValueError):
+            pass  # DNS, TLS, HTTP errors and edge startup pages are not readiness.
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(2, remaining))
+
+
 def start(root, cfg, offline=False):
     from telegram_test_pg import start_postgres, ensure_database, backup_database, stop_postgres
     old = read_state(root)
@@ -434,7 +475,7 @@ def start(root, cfg, offline=False):
             env = child_environment(root)
             process = spawn_logged([str(tunnel), "tunnel", "--config", str(root / "cloudflared-empty.yml"),
                                     "--origincert", str(root / "unused-origin-cert.pem"),
-                                    "--no-autoupdate", "--metrics", "127.0.0.1:0", "--url", session["public_url"]], root, f"{log_dir}/tunnel", env)
+                                    "--no-autoupdate", "--protocol", "http2", "--metrics", "127.0.0.1:0", "--url", session["public_url"]], root, f"{log_dir}/tunnel", env)
             state["tunnel"] = process_identity(process.pid)
             write_json(root / "processes.json", state)
             url = None
@@ -473,6 +514,7 @@ def start(root, cfg, offline=False):
             if not json.load(health).get("ok"):
                 raise TestStandError("Own API health check failed")
         if not offline:
+            wait_public_health(session["public_url"], process)
             state.update(**verified, public_url=session["public_url"], webhook_url=session["public_url"] + "/telegram/webhook")
             write_json(root / "processes.json", state)
             async def register():

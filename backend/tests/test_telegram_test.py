@@ -6,6 +6,7 @@ by these tests. The real lifespan is exercised with a fake bot and migration.
 
 import asyncio
 import importlib
+import io
 import json
 import logging
 from pathlib import Path
@@ -222,6 +223,200 @@ def test_only_verified_test_bot_gets_its_own_webhook(launcher):
     assert bot.writes == [("set", state["webhook_url"], {"secret_token": "test-only-webhook-secret"})]
     assert asyncio.run(launcher.clear_test_webhook(bot, state)) is True
     assert bot.writes[-1] == ("delete", {})
+
+
+@pytest.mark.parametrize("failures", [1, 6, 7])
+def test_webhook_dns_retry_is_bounded(launcher, monkeypatch, failures):
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SetWebhook
+
+    class DelayedDNS(FakeTelegram):
+        attempts = 0
+
+        async def set_webhook(self, url, **kwargs):
+            self.attempts += 1
+            if self.attempts <= failures:
+                raise TelegramBadRequest(method=SetWebhook(url=url), message="Bad Request: bad webhook: Failed to resolve host: Name or service not known")
+            return await super().set_webhook(url, **kwargs)
+
+    delays = []
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(launcher.asyncio, "sleep", fake_sleep)
+    bot = DelayedDNS()
+    verified = {"bot_id": bot.identity.id, "username": USERNAME}
+    operation = launcher.register_test_webhook(bot, verified, {}, "https://synthetic.trycloudflare.com", "synthetic-secret")
+    if failures == 7:
+        with pytest.raises(launcher.TestStandError, match="7 attempts"):
+            asyncio.run(operation)
+        assert bot.writes == []
+    else:
+        result = asyncio.run(operation)
+        assert result["webhook_url"] == bot.hook
+        assert len(bot.writes) == 1
+    assert bot.attempts == min(failures + 1, 7)
+    assert delays == [5] * min(failures, 6)
+
+
+def test_webhook_retry_rechecks_foreign_hook(launcher, monkeypatch):
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SetWebhook
+
+    class ChangedHook(FakeTelegram):
+        attempts = 0
+
+        async def set_webhook(self, url, **kwargs):
+            self.attempts += 1
+            self.hook = "https://foreign.invalid/telegram/webhook"
+            raise TelegramBadRequest(method=SetWebhook(url=url), message="Failed to resolve host")
+
+    async def fake_sleep(delay):
+        pass
+
+    monkeypatch.setattr(launcher.asyncio, "sleep", fake_sleep)
+    bot = ChangedHook()
+    with pytest.raises(launcher.TestStandError, match="another webhook"):
+        asyncio.run(launcher.register_test_webhook(bot, {"bot_id": bot.identity.id, "username": USERNAME}, {},
+                                                "https://synthetic.trycloudflare.com", "synthetic-secret"))
+    assert bot.attempts == 1
+    assert bot.hook == "https://foreign.invalid/telegram/webhook"
+
+
+def test_webhook_other_bad_request_is_not_retried(launcher, monkeypatch):
+    from aiogram.exceptions import TelegramBadRequest
+    from aiogram.methods import SetWebhook
+
+    async def rejected(url, **kwargs):
+        raise TelegramBadRequest(method=SetWebhook(url=url), message="Bad Request: certificate rejected")
+
+    async def forbidden_sleep(delay):
+        pytest.fail("A non-DNS rejection was retried")
+
+    bot = FakeTelegram()
+    monkeypatch.setattr(bot, "set_webhook", rejected)
+    monkeypatch.setattr(launcher.asyncio, "sleep", forbidden_sleep)
+    with pytest.raises(TelegramBadRequest, match="certificate rejected"):
+        asyncio.run(launcher.register_test_webhook(bot, {"bot_id": bot.identity.id, "username": USERNAME}, {},
+                                                "https://synthetic.trycloudflare.com", "synthetic-secret"))
+
+
+def test_tunnel_waits_through_dns_edge_errors_and_non_health_response(launcher, monkeypatch):
+    from urllib.error import HTTPError, URLError
+
+    class Response(io.BytesIO):
+        status = 200
+
+    replies = iter([URLError("Synthetic DNS not ready"), HTTPError("synthetic", 502, "edge not ready", {}, None),
+                    b"<html>not ready</html>", b"[]", b'{"ok":false}', b'{"ok":true}'])
+    calls, delays = [], []
+
+    def fake_open(url, timeout):
+        calls.append((url, timeout))
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return Response(reply)
+
+    monkeypatch.setattr(launcher, "build_opener", lambda *args: SimpleNamespace(open=fake_open))
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(launcher.time, "sleep", delays.append)
+    launcher.wait_public_health("https://synthetic.trycloudflare.com", SimpleNamespace(poll=lambda: None))
+    assert calls == [("https://synthetic.trycloudflare.com/health", 5)] * 6
+    assert delays == [2] * 5
+
+
+@pytest.mark.parametrize("exited", [False, True], ids=["timeout", "exited"])
+def test_unreachable_tunnel_never_becomes_ready(launcher, monkeypatch, exited):
+    from urllib.error import URLError
+
+    clock = [0]
+
+    def advance(delay):
+        clock[0] += delay
+
+    def failed_open(url, timeout):
+        raise URLError("Synthetic DNS failure")
+
+    monkeypatch.setattr(launcher, "build_opener", lambda *args: SimpleNamespace(open=failed_open))
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(launcher.time, "sleep", advance)
+    with pytest.raises(launcher.TestStandError, match="exited|no webhook"):
+        launcher.wait_public_health("https://synthetic.trycloudflare.com", SimpleNamespace(poll=lambda: 1 if exited else None), timeout=4)
+    assert clock[0] == (0 if exited else 4)
+
+
+def test_tunnel_health_refuses_foreign_url_before_network(launcher, monkeypatch):
+    def forbidden(*args):
+        pytest.fail("A foreign health URL reached the network")
+
+    monkeypatch.setattr(launcher, "build_opener", forbidden)
+    with pytest.raises(launcher.TestStandError):
+        launcher.wait_public_health("https://foreign.invalid", SimpleNamespace(poll=lambda: None))
+
+
+@pytest.mark.parametrize("reachable", [False, True], ids=["tunnel-not-ready", "tunnel-ready"])
+def test_start_registers_only_after_public_health(launcher, stand_config, tmp_path, monkeypatch, reachable):
+    import aiogram
+    pg = importlib.import_module("telegram_test_pg")
+    events = []
+    url = "https://synthetic.trycloudflare.com"
+    bot = FakeTelegram()
+
+    async def close():
+        pass
+
+    async def verify(*args):
+        return {"bot_id": bot.identity.id, "username": USERNAME}
+
+    async def register(*args):
+        assert "public-health" in events and reachable
+        events.append("register")
+        return {"bot_id": bot.identity.id, "username": USERNAME,
+                "public_url": url, "webhook_url": url + "/telegram/webhook"}
+
+    def spawn(command, root, name, env):
+        if name.endswith("/tunnel"):
+            assert command[command.index("--protocol") + 1] == "http2"
+            path = root / f"{name}.log"
+            path.parent.mkdir(parents=True)
+            path.write_text(url, encoding="utf-8")
+            return SimpleNamespace(pid=1, poll=lambda: None)
+        session = json.loads((root / "session-config.json").read_text(encoding="utf-8"))
+        launcher.write_json(root / "server-starting.json", {"session_id": session["session_id"], "process": {"pid": 2}})
+        launcher.write_json(root / "server-ready.json", {"session_id": session["session_id"]})
+        return SimpleNamespace(pid=2, poll=lambda: None)
+
+    def public_health(*args):
+        # Local API is already healthy, but the public URL may still fail.
+        assert "webhook_url" not in launcher.read_state(tmp_path)
+        events.append("public-health")
+        if not reachable:
+            raise launcher.TestStandError("Synthetic public tunnel timeout")
+
+    bot.session = SimpleNamespace(close=close)
+    monkeypatch.setattr(aiogram, "Bot", lambda token: bot)
+    monkeypatch.setattr(launcher, "load_bot_config", lambda path: {"username": USERNAME, "token": TOKEN})
+    monkeypatch.setattr(launcher, "configure_logging", lambda *args: None)
+    monkeypatch.setattr(launcher, "verify_test_bot", verify)
+    monkeypatch.setattr(launcher, "register_test_webhook", register)
+    monkeypatch.setattr(launcher, "download_tunnel", lambda root: root / "synthetic-cloudflared.exe")
+    monkeypatch.setattr(launcher, "spawn_logged", spawn)
+    monkeypatch.setattr(launcher, "process_identity", lambda pid: {"pid": pid})
+    monkeypatch.setattr(launcher, "owned_process", lambda info: False)
+    monkeypatch.setattr(launcher, "build_opener", lambda *args: SimpleNamespace(open=lambda *args, **kwargs: io.BytesIO(b'{"ok":true}')))
+    monkeypatch.setattr(launcher, "wait_public_health", public_health)
+    monkeypatch.setattr(launcher, "stop", lambda *args, **kwargs: events.append("stop"))
+    for name in ("start_postgres", "ensure_database", "backup_database"):
+        monkeypatch.setattr(pg, name, lambda *args: True)
+    if reachable:
+        launcher.start(tmp_path, stand_config)
+        assert events == ["public-health", "register"]
+    else:
+        with pytest.raises(launcher.TestStandError, match="Synthetic public tunnel timeout"):
+            launcher.start(tmp_path, stand_config)
+        assert events == ["public-health", "stop"]
 
 
 @pytest.mark.parametrize("username,bot_id,hook", [
