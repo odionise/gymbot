@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import json
@@ -14,6 +15,37 @@ from .history import comparable_history, history_id, slot_id, snapshot_key
 from .recommendations import save_recommendation
 
 PHASES = ("light", "medium", "heavy")  # historical labels
+
+
+@dataclass(frozen=True)
+class WeekState:
+    """Known or projected week values, without an ORM identity or defaults."""
+    id: str | None
+    user_id: int
+    mesocycle_id: str | None
+    week_start: date
+    week_number: int
+    phase_type: str
+    deload_reason: str | None
+    is_postponed: bool
+    missed_deload: bool
+    feeling_beat_up: bool
+    target_rir: float
+    targets_json: str
+
+
+@dataclass(frozen=True)
+class WeekPlan:
+    week: WeekState
+    prior: WeekState | None
+    before_prior: WeekState | None
+    source: str
+    new_block_number: int | None = None
+    prior_missed_deload: bool | None = None
+
+
+def week_state(item: TrainingWeek) -> WeekState:
+    return WeekState(**{name: getattr(item, name) for name in WeekState.__dataclass_fields__})
 
 
 def round_to_step(value: float, step: float) -> float:
@@ -46,7 +78,7 @@ def completed_new(db: Session, user_id: int) -> list[WorkoutSession]:
     return list(db.scalars(select(WorkoutSession).where(
         WorkoutSession.user_id == user_id, WorkoutSession.status == "completed",
         WorkoutSession.phase_type.is_not(None),
-    ).order_by(WorkoutSession.completed_at)))
+    ).order_by(WorkoutSession.completed_at, WorkoutSession.id)))
 
 
 def week_stats(db: Session, user_id: int, start: date) -> dict:
@@ -91,60 +123,67 @@ def declining_anchor(db: Session, user_id: int) -> bool:
                for rows in by_slot.values())
 
 
-def mark_missed_deload(db: Session, week: TrainingWeek | None) -> None:
+def missed_deload_value(db: Session, week: TrainingWeek | WeekState | None) -> bool | None:
     if not week or week.phase_type != "deload":
-        return
+        return None
     actual = sum(week_stats(db, week.user_id, week.week_start)["working"].values())
     earlier = list(db.scalars(select(TrainingWeek).where(
         TrainingWeek.user_id == week.user_id, TrainingWeek.week_start < week.week_start,
         TrainingWeek.phase_type == "accumulation",
     ).order_by(TrainingWeek.week_start.desc()).limit(2)))
     baselines = [sum(week_stats(db, week.user_id, item.week_start)["working"].values()) for item in earlier]
-    week.missed_deload = bool(baselines and median(baselines) > 0 and actual >= 0.8 * median(baselines))
+    return bool(baselines and median(baselines) > 0 and actual >= 0.8 * median(baselines))
 
 
-def resolve_week(db: Session, user_id: int, on_date: date) -> TrainingWeek:
+def mark_missed_deload(db: Session, week: TrainingWeek | None) -> None:
+    value = missed_deload_value(db, week)
+    if value is not None:
+        week.missed_deload = value
+
+
+def project_week(db: Session, user_id: int, on_date: date) -> WeekPlan:
+    """Resolve the same calendar decision as creation, using only SELECTs.
+
+    A newly evaluated missed-deload flag belongs to this projected context. It
+    must affect counts and reentry without mutating the persisted prior week.
+    Missing calendar weeks are not simulated as hypothetical workouts.
+    """
     start = monday(on_date)
     existing = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start == start))
-    if existing:
-        return existing
-    override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user_id, WeekOverride.week_start == start))
-    prior = db.scalar(select(TrainingWeek).where(
+    prior_item = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < start,
         TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
+    prior = week_state(prior_item) if prior_item else None
+    before_item = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user_id, TrainingWeek.week_start < prior.week_start,
+        TrainingWeek.phase_type != "vacation",
+    ).order_by(TrainingWeek.week_start.desc())) if prior else None
+    before_prior = week_state(before_item) if before_item else None
+    if existing:
+        return WeekPlan(week_state(existing), prior, before_prior, "saved")
+    override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user_id, WeekOverride.week_start == start))
     if override and override.kind == "vacation":
-        if prior:
-            mesocycle = db.get(Mesocycle, prior.mesocycle_id)
-        else:
-            mesocycle = Mesocycle(user_id=user_id, block_number=1, start_week=start)
-            db.add(mesocycle)
-            db.flush()
-        week = TrainingWeek(user_id=user_id, mesocycle_id=mesocycle.id,
-                            week_start=start, week_number=prior.week_number if prior else 0,
-                            phase_type="vacation", target_rir=0, targets_json="{}")
-        db.add(week)
-        db.flush()
-        return week
-    mark_missed_deload(db, prior)
+        week = WeekState(None, user_id, prior.mesocycle_id if prior else None, start,
+                         prior.week_number if prior else 0, "vacation", None,
+                         False, False, False, 0, "{}")
+        return WeekPlan(week, prior, before_prior, "calculated", None if prior else 1)
+    missed = missed_deload_value(db, prior)
+    if missed is not None:
+        prior = replace(prior, missed_deload=missed)
     last_stats = week_stats(db, user_id, start - timedelta(days=7))
     avg_rir = last_stats["avg_rir"]
     decline = declining_anchor(db, user_id)
     fatigue = (avg_rir is not None and avg_rir < 1) or decline
+    new_block = None
     if prior is None or (prior.phase_type == "deload" and not prior.missed_deload) or (start - prior.week_start).days > 35:
         number = 1
-        block = db.get(Mesocycle, prior.mesocycle_id).block_number + 1 if prior else 1
-        mesocycle = Mesocycle(user_id=user_id, block_number=block, start_week=start)
-        db.add(mesocycle)
-        db.flush()
+        new_block = db.get(Mesocycle, prior.mesocycle_id).block_number + 1 if prior else 1
     else:
-        mesocycle = db.get(Mesocycle, prior.mesocycle_id)
         number = prior.week_number + 1
         if number > 5 or (number == 5 and not prior.is_postponed and not prior.missed_deload):
-            mesocycle = Mesocycle(user_id=user_id, block_number=mesocycle.block_number + 1, start_week=start)
-            db.add(mesocycle)
-            db.flush()
+            new_block = db.get(Mesocycle, prior.mesocycle_id).block_number + 1
             number = 1
     scheduled = number >= 4
     postpone = (scheduled and number == 4 and not fatigue and avg_rir is not None
@@ -157,11 +196,26 @@ def resolve_week(db: Session, user_id: int, on_date: date) -> TrainingWeek:
         MuscleTarget.user_id == user_id))}
     targets = {group: [item.min_sets, item.max_sets, item.cap_sets]
                for group, item in saved_targets.items()}
-    week = TrainingWeek(user_id=user_id, mesocycle_id=mesocycle.id,
-                        week_start=start, week_number=number, phase_type=phase,
-                        deload_reason=reason, is_postponed=postpone,
-                        target_rir=4 if phase == "deload" else 2,
-                        targets_json=json.dumps(targets, ensure_ascii=False))
+    week = WeekState(None, user_id, None if new_block else prior.mesocycle_id, start, number,
+                     phase, reason, postpone, False, False, 4 if phase == "deload" else 2,
+                     json.dumps(targets, ensure_ascii=False))
+    return WeekPlan(week, prior, before_prior, "calculated", new_block, missed)
+
+
+def resolve_week(db: Session, user_id: int, on_date: date) -> TrainingWeek:
+    """Persist a shared week decision only on the existing write paths."""
+    plan = project_week(db, user_id, on_date)
+    if plan.source == "saved":
+        return db.get(TrainingWeek, plan.week.id)
+    if plan.prior_missed_deload is not None:
+        db.get(TrainingWeek, plan.prior.id).missed_deload = plan.prior_missed_deload
+    values = {name: getattr(plan.week, name) for name in WeekState.__dataclass_fields__ if name != "id"}
+    if plan.new_block_number is not None:
+        mesocycle = Mesocycle(user_id=user_id, block_number=plan.new_block_number, start_week=plan.week.week_start)
+        db.add(mesocycle)
+        db.flush()
+        values["mesocycle_id"] = mesocycle.id
+    week = TrainingWeek(**values)
     db.add(week)
     db.flush()
     return week
@@ -259,17 +313,21 @@ def recommendation_context(db: Session, exercise: Exercise, week: TrainingWeek, 
             "manual_override": {}, "action_label": result["action"]}
 
 
-def planned_counts(db: Session, user_id: int, week: TrainingWeek, details: dict | None = None) -> dict[str, int]:
+def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, details: dict | None = None,
+                   *, week_plan: WeekPlan | None = None,
+                   movement_map: dict[str, Movement] | None = None) -> dict[str, int]:
     templates = list(db.scalars(select(WorkoutTemplate).where(
         WorkoutTemplate.user_id == user_id, WorkoutTemplate.active.is_(True))))
-    exercises = [e for t in templates for e in t.exercises if e.active and movement_for(db, e, user_id).kind == "strength"]
+    def lookup(e: Exercise) -> Movement:
+        return movement_map[e.id] if movement_map is not None else movement_for(db, e, user_id)
+    exercises = [e for t in templates for e in t.exercises if e.active and lookup(e).kind == "strength"]
     counts = {e.id: e.sets_count for e in exercises}
     trace = {e.id: {"base": e.sets_count, "reason_code": "base",
                     "reason": "Базовое число подходов из программы."} for e in exercises}
     def explain(code: str, reason: str) -> None:
         for item in trace.values():
             item.update(reason_code=code, reason=reason)
-    movements = {e.id: movement_for(db, e, user_id) for e in exercises}
+    movements = {e.id: lookup(e) for e in exercises}
     def volume(group: str) -> float:
         return sum(counts[e.id] * (1 if movements[e.id].primary_group == group else
                    0.5 if group in split_details(movements[e.id].secondary_groups) else 0)
@@ -305,7 +363,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek, details: dict 
         counts = {e.id: max(1, round(e.sets_count * 0.5)) for e in exercises}
         explain("deload", "Лёгкая неделя: половина базовых подходов с округлением к ближайшему целому (половины к чётному), минимум один; недельный предел 8 на мышцу.")
         return enforce_limits(deload=True)
-    prior = db.scalar(select(TrainingWeek).where(
+    prior = week_plan.prior if week_plan is not None else db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < week.week_start,
         TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
@@ -316,7 +374,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek, details: dict 
     if week.week_number < 2 or not prior:
         explain("base", "Начало блока или нет предыдущей тренировочной недели: базовые подходы.")
         return enforce_limits()
-    before_prior = db.scalar(select(TrainingWeek).where(
+    before_prior = week_plan.before_prior if week_plan is not None else db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < prior.week_start,
         TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
@@ -364,6 +422,14 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek, details: dict 
             else:
                 trace[candidate.id].update(reason_code="max_sets", reason="Недельные условия роста выполнены, но упражнение уже достигло предела 12 подходов: прибавки нет.")
     return enforce_limits()
+
+
+def is_reentry(db: Session, user_id: int, week: TrainingWeek | WeekState, week_plan: WeekPlan | None = None) -> bool:
+    prior = week_plan.prior if week_plan is not None else db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user_id, TrainingWeek.week_start < week.week_start,
+        TrainingWeek.phase_type != "vacation",
+    ).order_by(TrainingWeek.week_start.desc()))
+    return bool(week.phase_type == "accumulation" and prior and prior.phase_type == "deload" and not prior.missed_deload)
 
 
 def next_set_suggestion(item: SessionExercise, step: float) -> dict | None:
@@ -421,11 +487,7 @@ def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date)
         return None
     count_details = {}
     planned_counts(db, template.user_id, week, count_details)
-    prior = db.scalar(select(TrainingWeek).where(
-        TrainingWeek.user_id == template.user_id, TrainingWeek.week_start < week.week_start,
-        TrainingWeek.phase_type != "vacation",
-    ).order_by(TrainingWeek.week_start.desc()))
-    reentry = bool(week.phase_type == "accumulation" and prior and prior.phase_type == "deload" and not prior.missed_deload)
+    reentry = is_reentry(db, template.user_id, week)
     session = WorkoutSession(user_id=template.user_id, template_id=template.id,
         template_name=template.name, muscle_group=template.muscle_group,
         scheduled_date=on_date, phase=1, phase_type=week.phase_type, week_id=week.id)

@@ -5,24 +5,25 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.types import Update
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from .analytics import progress_for_user
-from .auth import current_user
+from .auth import authenticated_user_id, current_user
 from .bot import dispatcher, reminder_loop
 from .config import get_settings
-from .db import Base, engine, get_db
+from .db import Base, engine, get_db, get_preview_db
 from .migrations import migrate
 from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, new_id, utcnow
 from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used
 from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS
-from .planning import get_or_create_session, monday, movement_for, planned_counts, recommendation_context, resolve_week
+from .planning import get_or_create_session, is_reentry, monday, movement_for, planned_counts, recommendation_context, resolve_week
+from .preview import preview_session
 from .recommendations import recommendation_dict, record_manual_target, save_recommendation
-from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
+from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
 
@@ -434,6 +435,13 @@ def start_session(template_id: str, user: User = Depends(current_user), db: Sess
     return session_dict(session, template)
 
 
+@app.get("/api/templates/{template_id}/preview", response_model=SessionPreviewOut)
+def template_preview(template_id: str, on_date: date, response: Response,
+                     user_id: int = Depends(authenticated_user_id), db: Session = Depends(get_preview_db)):
+    response.headers["Cache-Control"] = "no-store"
+    return preview_session(db, user_id, template_id, on_date)
+
+
 @app.get("/api/sessions")
 def history(user: User = Depends(current_user), db: Session = Depends(get_db)):
     items = db.scalars(select(WorkoutSession).where(
@@ -604,11 +612,7 @@ def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current
     session.scheduled_date, session.week_id, session.phase_type = new_date, week.id, week.phase_type
     count_details = {}
     planned_counts(db, user.telegram_id, week, count_details)
-    prior = db.scalar(select(TrainingWeek).where(
-        TrainingWeek.user_id == user.telegram_id, TrainingWeek.week_start < week.week_start,
-        TrainingWeek.phase_type != "vacation",
-    ).order_by(TrainingWeek.week_start.desc()))
-    reentry = bool(week.phase_type == "accumulation" and prior and prior.phase_type == "deload" and not prior.missed_deload)
+    reentry = is_reentry(db, user.telegram_id, week)
     for item in session.exercises:
         exercise = db.get(Exercise, item.exercise_id)
         movement = movement_for(db, exercise, user.telegram_id)

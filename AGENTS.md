@@ -4,6 +4,7 @@
 - Use synthetic data and an isolated SQLite/PostgreSQL database. Production, webhook, live notifications, publication, PR creation and merging require their separately approved scope.
 - Preserve the weight progression formula and phase/reentry RIR policy. Approved stage 2 (02.11.2026) clamps automatic reps to the configured range and makes deload RIR 4 take priority; reentry RIR 2.5 applies only in accumulation. New assignment, stable slot and comparable history are different identities; never merge them by name or ordinal position.
 - Check backend tests, TypeScript/Vite build and affected migrations on both SQLite and PostgreSQL. Report actual passes, failures and skipped checks separately.
+- The preview API is strictly read-only: authenticate without user registration, use a fresh guarded read transaction, project week decisions in memory and validate existing movement links. Never call workout creation, movement backfill or write-then-rollback from preview. Schema version remains 6; UI integration is a separate task.
 - Do not add dependencies, global configuration or additional product features without agreement. Keep temporary tools/data outside Git in an owned temporary directory or ignored `.venv`.
 
 ## Visual scope

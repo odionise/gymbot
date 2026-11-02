@@ -34,11 +34,11 @@ def verify_init_data(raw: str, token: str, now: int | None = None) -> int:
     return user_id
 
 
-def current_user(
-    db: Session = Depends(get_db),
+def authenticated_user_id(
     authorization: str | None = Header(default=None),
     x_dev_user_id: int | None = Header(default=None),
-) -> User:
+) -> int:
+    """Authenticate the same identity without creating or updating a user."""
     settings = get_settings()
     if settings.app_env == "development" and x_dev_user_id and x_dev_user_id == settings.dev_telegram_id:
         user_id = x_dev_user_id
@@ -49,6 +49,15 @@ def current_user(
             user_id = verify_init_data(authorization[4:], settings.bot_token)
         except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise HTTPException(401, str(exc)) from exc
+    return user_id
+
+
+def current_user(
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+    x_dev_user_id: int | None = Header(default=None),
+) -> User:
+    user_id = authenticated_user_id(authorization, x_dev_user_id)
     user = db.get(User, user_id)
     if user is None:
         user = User(telegram_id=user_id)

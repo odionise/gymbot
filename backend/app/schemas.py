@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
+from datetime import date, datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .muscles import ALL_DETAILED_GROUPS, MUSCLE_GROUPS, split_muscle_groups
 
@@ -174,3 +176,56 @@ class DurationIn(BaseModel):
 
 class NextWeekIn(BaseModel):
     kind: Literal["deload", "vacation"]
+
+
+class PreviewWeekOut(BaseModel):
+    week_start: date
+    week_number: int
+    phase_type: str
+    deload_reason: str | None
+    is_postponed: bool
+    missed_deload: bool
+    source: Literal["saved", "calculated"]
+
+
+class PreviewReferenceOut(BaseModel):
+    id: str
+    scheduled_date: date
+    status: str
+
+
+class PreviewBlockerOut(BaseModel):
+    code: str
+    message: str
+    template_id: str | None = None
+    exercise_id: str | None = None
+
+
+class PreviewExerciseOut(BaseModel):
+    exercise_id: str
+    slot_id: str
+    history_id: str
+    movement_id: str
+    name: str
+    kind: str
+    position: int
+    sets_count: int | None
+    target_weight: float | None
+    target_reps: int | None
+    target_rir: float | None
+    target_duration_minutes: int | None
+    recommendation: dict | None
+
+
+class SessionPreviewOut(BaseModel):
+    state: Literal["ready", "existing", "blocked"]
+    template_id: str
+    on_date: date
+    timezone: str
+    computed_at: datetime
+    provisional: Literal[True]
+    persisted: Literal[False]
+    week: PreviewWeekOut | None
+    exercises: list[PreviewExerciseOut]
+    existing_session: PreviewReferenceOut | None
+    blocking_reasons: list[PreviewBlockerOut]
