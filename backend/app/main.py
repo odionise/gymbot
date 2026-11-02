@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     migrate(engine)
     bot = Bot(settings.bot_token) if settings.bot_token and settings.bot_token != "replace-with-botfather-token" else None
     app.state.bot = bot
-    task = asyncio.create_task(reminder_loop(bot)) if bot else None
+    task = asyncio.create_task(reminder_loop(bot)) if bot and settings.reminders_enabled else None
     if bot and settings.app_env == "production":
         await bot.set_webhook(
             f"{settings.public_url.rstrip('/')}/telegram/webhook",

@@ -6,6 +6,7 @@
 - Check backend tests, TypeScript/Vite build and affected migrations on both SQLite and PostgreSQL. Report actual passes, failures and skipped checks separately.
 - The preview API is strictly read-only: authenticate without user registration, use a fresh guarded read transaction, project week decisions in memory and validate existing movement links. Never call workout creation, movement backfill or write-then-rollback from preview. Schema version remains 6; UI integration is a separate task.
 - Do not add dependencies, global configuration or additional product features without agreement. Keep temporary tools/data outside Git in an owned temporary directory or ignored `.venv`.
+- `.venv/telegram-test` is a persistent private stand, not disposable virtualenv/cache: it contains bot.env, an owned PostgreSQL cluster, backups and session credentials. Never delete/reset it during cleanup or recreate .venv over it. Its launcher reads neither production .env nor .env.local, requires a dedicated `_test_bot`, keeps dev login/reminders disabled and guards webhook changes. `prepare`/offline checks do not start a tunnel or contact Telegram; online start is a separate user action.
 
 ## Visual scope
 

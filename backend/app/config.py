@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./workout.db"
     webhook_secret: str = ""
     dev_telegram_id: int = 0
+    reminders_enabled: bool = True
 
 
 @lru_cache
