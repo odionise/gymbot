@@ -16,11 +16,11 @@ const emptyExercise: ExerciseInput = {
   name: '', position: 0, sets_count: 3, medium_weight: 0, weight_step: 2.5,
   light_factor: 0.9, heavy_factor: 1.05,
   light_min: 12, light_max: 15, medium_min: 8, medium_max: 12, heavy_min: 6, heavy_max: 8,
-  movement_id: null, rep_min: 6, rep_max: 12, rir_target: 2, duration_minutes: null,
+  movement_id: null, rep_min: 6, rep_max: 12, duration_minutes: null,
 }
 
 function exerciseInput(exercise: Exercise): ExerciseInput {
-  const { id: _id, slot_id: _slot, history_id: _history, ...settings } = exercise
+  const { id: _id, slot_id: _slot, history_id: _history, rir_target: _legacyRir, ...settings } = exercise
   return settings
 }
 
@@ -62,7 +62,7 @@ function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, 
       {query.length > 0 && query.length < 3 && <p className="fieldHelp">Введите не меньше трёх букв для поиска.</p>}
       <div className="movementChoiceList" role="listbox" aria-label="Выберите упражнение">{filteredMovements.length ? filteredMovements.map(item => <button type="button" role="option" key={item.id} className={form.movement_id === item.id ? 'selected' : ''} aria-selected={form.movement_id === item.id} onClick={() => { setForm({ ...form, movement_id: item.id, name: item.name, duration_minutes: item.kind === 'strength' ? null : form.duration_minutes ?? 20 }); setPickerOpen(false) }}><strong>{item.name}</strong><small>{item.kind === 'strength' ? item.primary_group : movementKinds[item.kind]}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></button>) : <p className="fieldHelp">Упражнения не найдены. Добавьте движение в «Списке упражнений».</p>}</div>
     </div>}
-    {selectedMovement?.kind !== 'strength' && selectedMovement ? <div className="fieldGrid">{numberField('duration_minutes', 'План, минут')}{numberField('position', 'Порядок')}</div> : <><div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}{numberField('position', 'Порядок')}</div><div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}{numberField('rir_target', 'Целевой ПДО', '0.5')}</div></>}
+    {selectedMovement?.kind !== 'strength' && selectedMovement ? <div className="fieldGrid">{numberField('duration_minutes', 'План, минут')}{numberField('position', 'Порядок')}</div> : <><div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}{numberField('position', 'Порядок')}</div><div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}</div><p className="fieldHelp">ПДО назначается фазой недели и правилом возвращения. Целевое значение показано в тренировке; фактический ПДО записывается после подхода.</p></>}
     <button className="primaryButton" type="submit" disabled={!form.movement_id}>{exercise ? 'Сохранить настройки' : 'Сохранить упражнение'}</button>
   </form>
 }

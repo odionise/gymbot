@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import { formatWeight, phaseText } from './App'
+import { NextSetDetails, RecommendationDetails } from './RecommendationDetails'
 import type { SessionExercise, WorkoutSession } from './types'
 
 function SetRow({ item, index, onChange, onError }: {
@@ -10,13 +11,13 @@ function SetRow({ item, index, onChange, onError }: {
   const suggestion = item.weight_step !== null && item.next_set?.set_index === index ? item.next_set : null
   const [weight, setWeight] = useState(String(saved?.weight ?? suggestion?.weight ?? item.target_weight))
   const [reps, setReps] = useState(String(saved?.reps ?? suggestion?.reps ?? item.target_reps))
-  const [rir, setRir] = useState(String(saved?.rir_reported ?? item.target_rir ?? 2))
+  const [rir, setRir] = useState(saved?.rir_reported == null ? '' : String(saved.rir_reported))
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     setWeight(String(saved?.weight ?? suggestion?.weight ?? item.target_weight))
     setReps(String(saved?.reps ?? suggestion?.reps ?? item.target_reps))
-    setRir(String(saved?.rir_reported ?? item.target_rir ?? 2))
-  }, [saved?.weight, saved?.reps, saved?.rir_reported, suggestion?.weight, suggestion?.reps, item.target_weight, item.target_reps, item.target_rir])
+  }, [saved?.weight, saved?.reps, suggestion?.weight, suggestion?.reps, item.target_weight, item.target_reps])
+  useEffect(() => { setRir(saved?.rir_reported == null ? '' : String(saved.rir_reported)) }, [saved?.rir_reported])
   const save = async () => {
     setBusy(true)
     try { onChange(await api.saveSet(item.id, index, Number(weight), Number(reps), rir === '' ? null : Number(rir), index > 0)) }
@@ -40,7 +41,7 @@ function SetRow({ item, index, onChange, onError }: {
     <span className="setNumber">{index > 0 ? index : 'Р' + Math.abs(index)}</span>
     {valueField('вес, кг', weight, setWeight, item.weight_step, 1000, 'decimal')}
     {valueField('повторы', reps, setReps, 1, 100, 'numeric')}
-    {valueField('ПДО', rir, setRir, 0.5, 10, 'decimal')}
+    {valueField('факт ПДО', rir, setRir, 0.5, 10, 'decimal')}
     <button className={`saveSet ${saved ? 'saved' : ''}`} onClick={save} disabled={busy || weight === '' || reps === '' || (index > 0 && rir === '')} aria-label={saved ? 'Обновить подход' : 'Сохранить подход'}>{saved ? '✓' : '→'}</button>
     {saved && <button className="deleteSet" onClick={remove} disabled={busy} aria-label="Удалить подход">×</button>}
   </div>
@@ -49,6 +50,7 @@ function SetRow({ item, index, onChange, onError }: {
 function ExerciseBlock({ item, onChange, onError }: {
   item: SessionExercise; onChange: (value: WorkoutSession) => void; onError: (value: string) => void
 }) {
+  const hasManualTarget = Boolean(item.recommendation?.manual_override && Object.keys(item.recommendation.manual_override).length)
   const [editing, setEditing] = useState(false)
   const [warmups, setWarmups] = useState(Math.max(1, ...item.results.filter(result => !result.is_working).map(result => Math.abs(result.set_index))))
   const lastWarmupSaved = item.results.some(result => !result.is_working && result.set_index === -warmups)
@@ -76,13 +78,15 @@ function ExerciseBlock({ item, onChange, onError }: {
   }
   return <section className={`exerciseCard ${item.skipped ? 'skipped' : ''}`}>
     <div className="exerciseHead"><div><span className="cardIndex">Упражнение {item.position + 1}</span><h2>{item.name}</h2></div><span className="exerciseCheck">{item.results.filter(result => result.is_working).length}<span> / {item.sets_count}</span></span></div>
-    <div className="targetLine"><div className="targetWeight"><span>Вес</span><strong>{formatWeight(item.target_weight)}<small> кг</small></strong></div><div className="targetReps"><span>Повторы</span><strong>{item.sets_count} × {item.target_reps}</strong><small>Диапазон {item.min_reps}–{item.max_reps} · ПДО {item.target_rir ?? '—'}</small></div></div>
-    {item.action_label && <p className="hint">{item.action_label}</p>}
+    <div className="targetLine"><div className="targetWeight"><span>План, вес</span><strong>{formatWeight(item.target_weight)}<small> кг</small></strong></div><div className="targetReps"><span>План, повторы</span><strong>{item.sets_count} × {item.target_reps}</strong><small>Диапазон {item.min_reps}–{item.max_reps} · целевой ПДО {item.target_rir ?? '—'}</small></div></div>
+    {hasManualTarget ? <p className="hint"><strong>План изменён вручную.</strong> {item.recommendation?.calculated ? 'Исходный расчёт сохранён в объяснении.' : 'Подробности исходного расчёта не сохранены.'}</p> : item.action_label && <p className="hint">{item.action_label}</p>}
+    <RecommendationDetails item={item} />
     {item.weight_step !== null && item.next_set && <p className="hint">Следующий подход: {formatWeight(item.next_set.weight)} кг × {item.next_set.reps}; {item.next_set.reason.toLowerCase()}.</p>}
+    {item.weight_step !== null && <NextSetDetails item={item} />}
     {item.weight_step === null && <p className="hint">В старом занятии шаг веса не сохранён. Вес можно вводить вручную; кнопки изменения веса и подсказка следующего подхода недоступны.</p>}
     {!item.results.length && <button className="textButton" onClick={() => setEditing(!editing)}>{editing ? 'Скрыть изменение' : 'Изменить цель'}</button>}
     {editing && !item.results.length && <div className="overrideBox"><label>Вес, кг<input type="number" min="0" step="0.5" value={weight} onChange={event => setWeight(event.target.value)} /></label><label>Повторы<input type="number" min="1" value={reps} onChange={event => setReps(event.target.value)} /></label><button onClick={override}>Сохранить</button></div>}
-    {!item.skipped && <div className="setsList"><div className="setsCaption"><span>Подходы</span><span>Вес, повторы и ПДО</span></div><small>Разминка (не входит в объём)</small>{Array.from({ length: warmups }, (_, n) => <SetRow key={-n - 1} item={item} index={-n - 1} onChange={onChange} onError={onError} />)}<div className="programActions warmupActions"><button disabled={warmups >= 5 || warmupBusy} onClick={() => setWarmups(count => count + 1)}>+ Разминка</button><button disabled={warmups === 0 || warmupBusy} onClick={removeWarmup}>− Разминка</button></div>{Array.from({ length: item.sets_count }, (_, n) => <SetRow key={n + 1} item={item} index={n + 1} onChange={onChange} onError={onError} />)}<div className="programActions"><button disabled={item.sets_count >= 12} onClick={async () => { try { onChange(await api.changeSetsCount(item.id, item.sets_count + 1)) } catch (err) { onError((err as Error).message) } }}>+ Подход</button><button disabled={item.sets_count <= 1 || item.results.some(result => result.is_working && result.set_index === item.sets_count)} onClick={async () => { try { onChange(await api.changeSetsCount(item.id, item.sets_count - 1)) } catch (err) { onError((err as Error).message) } }}>− Подход</button></div></div>}
+    {!item.skipped && <div className="setsList"><div className="setsCaption"><span>Подходы</span><span>Факт: вес, повторы, ПДО</span></div><p className="fieldHelp">Запишите фактический ПДО каждого рабочего подхода. Поле пустое до вашего ввода; 0 означает отсутствие запаса повторов.</p><small>Разминка (не входит в объём)</small>{Array.from({ length: warmups }, (_, n) => <SetRow key={-n - 1} item={item} index={-n - 1} onChange={onChange} onError={onError} />)}<div className="programActions warmupActions"><button disabled={warmups >= 5 || warmupBusy} onClick={() => setWarmups(count => count + 1)}>+ Разминка</button><button disabled={warmups === 0 || warmupBusy} onClick={removeWarmup}>− Разминка</button></div>{Array.from({ length: item.sets_count }, (_, n) => <SetRow key={n + 1} item={item} index={n + 1} onChange={onChange} onError={onError} />)}<div className="programActions"><button disabled={item.sets_count >= 12} onClick={async () => { try { onChange(await api.changeSetsCount(item.id, item.sets_count + 1)) } catch (err) { onError((err as Error).message) } }}>+ Подход</button><button disabled={item.sets_count <= 1 || item.results.some(result => result.is_working && result.set_index === item.sets_count)} onClick={async () => { try { onChange(await api.changeSetsCount(item.id, item.sets_count - 1)) } catch (err) { onError((err as Error).message) } }}>− Подход</button></div></div>}
     <button className="skipButton" onClick={skip}>{item.skipped ? 'Вернуть упражнение' : 'Пропустить упражнение'}</button>
   </section>
 }

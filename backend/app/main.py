@@ -20,7 +20,8 @@ from .migrations import migrate
 from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, new_id, utcnow
 from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used
 from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS
-from .planning import get_or_create_session, monday, movement_for, planned_counts, prescription, resolve_week
+from .planning import get_or_create_session, monday, movement_for, planned_counts, recommendation_context, resolve_week
+from .recommendations import recommendation_dict, record_manual_target, save_recommendation
 from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
@@ -304,6 +305,8 @@ def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(cur
     data.name = movement.name
     values = data.model_dump()
     values["movement_id"] = movement.id
+    if "rir_target" not in data.model_fields_set:
+        values.pop("rir_target")
     changed = db.execute(update(Exercise).where(Exercise.id == item.id, Exercise.active.is_(True)).values(**values))
     if changed.rowcount != 1:
         db.rollback()
@@ -455,6 +458,11 @@ def override_target(item_id: str, data: OverrideIn, user: User = Depends(current
         raise HTTPException(409, "Target can only change before recording sets")
     item.target_weight = data.target_weight
     item.target_reps = data.target_reps
+    # Capture the stored Numeric precision, rather than a request float that
+    # the database may round differently. The explanation must match fresh GET.
+    db.flush()
+    db.refresh(item, ["target_weight", "target_reps"])
+    record_manual_target(item, weight=float(item.target_weight), reps=item.target_reps)
     db.commit()
     return session_detail(session.id, user, db)
 
@@ -479,6 +487,7 @@ def change_sets_count(item_id: str, data: SetsCountIn, user: User = Depends(curr
     if session.status == "completed" or any(r.is_working and r.set_index > data.sets_count for r in item.results):
         raise HTTPException(409, "Cannot remove a recorded set")
     item.sets_count = data.sets_count
+    record_manual_target(item, sets_count=data.sets_count)
     db.commit()
     return session_detail(session.id, user, db)
 
@@ -593,20 +602,30 @@ def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current
     if week.phase_type == "vacation":
         raise HTTPException(409, "На неделю отпуска нельзя перенести тренировку")
     session.scheduled_date, session.week_id, session.phase_type = new_date, week.id, week.phase_type
-    counts = planned_counts(db, user.telegram_id, week)
+    count_details = {}
+    planned_counts(db, user.telegram_id, week, count_details)
     prior = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user.telegram_id, TrainingWeek.week_start < week.week_start,
         TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
-    reentry = bool(prior and prior.phase_type == "deload" and not prior.missed_deload)
+    reentry = bool(week.phase_type == "accumulation" and prior and prior.phase_type == "deload" and not prior.missed_deload)
     for item in session.exercises:
         exercise = db.get(Exercise, item.exercise_id)
         movement = movement_for(db, exercise, user.telegram_id)
         timed = movement.kind != "strength"
-        weight, reps, action = (0, 0, "Цель по времени") if timed else prescription(db, exercise, week, reentry)
+        old_context = recommendation_dict(item)
+        manual = old_context.get("manual_override", {}) if old_context else {}
+        context = None if timed else recommendation_context(db, exercise, week, reentry, count_details[exercise.id])
+        calculated = context["calculated"] if context else {"weight": 0, "reps": 0, "sets_count": 0, "rir": None}
         item.kind, item.target_duration_minutes = movement.kind, exercise.duration_minutes if timed else None
-        item.sets_count, item.target_weight, item.target_reps = 0 if timed else counts[exercise.id], weight, reps
-        item.target_rir, item.action_label = None if timed else (2.5 if reentry else week.target_rir), action
+        item.sets_count = manual.get("sets_count", calculated["sets_count"])
+        item.target_weight, item.target_reps = manual.get("weight", calculated["weight"]), manual.get("reps", calculated["reps"])
+        item.target_rir, item.action_label = calculated["rir"], context["action_label"] if context else "Цель по времени"
+        item.weight_step = None if timed else exercise.weight_step
+        item.min_reps, item.max_reps = (0, 0) if timed else (exercise.rep_min or exercise.medium_min, exercise.rep_max or exercise.medium_max)
+        if context is not None:
+            context["manual_override"] = manual
+            save_recommendation(item, context)
         item.primary_group, item.secondary_groups = movement.primary_group, movement.secondary_groups
     db.commit()
     return session_dict(session, db.get(WorkoutTemplate, session.template_id))

@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, func, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -171,6 +171,7 @@ class SessionExercise(Base):
     target_duration_minutes: Mapped[int | None] = mapped_column(Integer)
     actual_duration_minutes: Mapped[int | None] = mapped_column(Integer)
     weight_step: Mapped[float | None] = mapped_column(Numeric(7, 2))
+    recommendation_context_json: Mapped[str | None] = mapped_column(Text)
     session: Mapped[WorkoutSession] = relationship(back_populates="exercises")
     exercise: Mapped[Exercise] = relationship()
     results: Mapped[list["SetResult"]] = relationship(back_populates="session_exercise", order_by="SetResult.set_index", cascade="all, delete-orphan")

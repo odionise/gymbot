@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import Exercise, Mesocycle, Movement, MuscleTarget, SessionExercise, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate
+from .models import Exercise, Mesocycle, Movement, MuscleTarget, SessionExercise, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, utcnow
 from .muscles import split_details
 from .history import comparable_history, history_id, slot_id, snapshot_key
+from .recommendations import save_recommendation
 
 PHASES = ("light", "medium", "heavy")  # historical labels
 
@@ -36,7 +37,8 @@ def movement_for(db: Session, exercise: Exercise, user_id: int) -> Movement:
     exercise.movement_id = movement.id
     exercise.rep_min = exercise.rep_min or exercise.medium_min
     exercise.rep_max = exercise.rep_max or exercise.medium_max
-    exercise.rir_target = exercise.rir_target or 2
+    # The legacy assignment RIR is retained as recorded, including 0 and NULL.
+    # New workout targets come from the phase/reentry policy instead.
     return movement
 
 
@@ -176,36 +178,97 @@ def latest_accumulation(db: Session, exercise_id: str) -> list[SessionExercise]:
     ).order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).limit(3)))
 
 
-def prescription(db: Session, exercise: Exercise, week: TrainingWeek, reentry: bool) -> tuple[float, int, str]:
+def prescription_details(db: Session, exercise: Exercise, week: TrainingWeek, reentry: bool) -> dict:
+    """Calculate targets and evidence together so the explanation cannot drift."""
     minimum = exercise.rep_min or exercise.medium_min
     maximum = exercise.rep_max or exercise.medium_max
     step = float(exercise.weight_step)
     history = latest_accumulation(db, exercise.id)
-    if not history:
-        return round_to_step(float(exercise.medium_weight), step), minimum, "Стартовый вес"
-    weights = [float(next((r.weight for r in item.results if r.is_working), item.target_weight))
-               for item in history]
-    weight = round_to_step(median(weights), step)
-    last = history[0]
-    results = [r for r in last.results if r.is_working]
-    if week.phase_type == "deload":
-        return weight, minimum, "Легкая неделя: вес без повышения"
-    if reentry:
-        return weight, minimum, "Возвращение после легкой недели: вес без повышения"
-    if results and len(results) == last.sets_count and all(
-        r.reps >= maximum and r.rir_reported is not None and float(r.rir_reported) >= 1 for r in results
-    ):
-        return round_to_step(weight + step, step), minimum, "Верх диапазона: +1 шаг веса"
-    if results and all(r.rir_reported is not None and float(r.rir_reported) >= 1 for r in results):
-        return weight, min(maximum, round(median(r.reps for r in results)) + 1), "Добавить повторение"
-    return weight, minimum, "Сохранить вес: проверить восстановление"
+    evidence = []
+    for item in history:
+        working = [r for r in item.results if r.is_working]
+        evidence.append({
+            "session_id": item.session_id, "session_exercise_id": item.id,
+            "date": (item.session.actual_date or item.session.scheduled_date).isoformat(),
+            "completed_at": item.session.completed_at.isoformat() if item.session.completed_at else None,
+            "base_weight": float(working[0].weight if working else item.target_weight),
+            "weight_source": "first_working" if working else "planned", "planned_sets": item.sets_count,
+            "working_sets": [{"set_index": r.set_index, "weight": float(r.weight), "reps": r.reps,
+                              "rir": float(r.rir_reported) if r.rir_reported is not None else None}
+                             for r in working],
+        })
+    raw_median = median(row["base_weight"] for row in evidence) if evidence else None
+    base = round_to_step(raw_median if raw_median is not None else float(exercise.medium_weight), step)
+    weight, reps, reps_median = base, minimum, None
+    weight_code, reps_code = "start", "lower_bound"
+    action = "Стартовый вес"
+    weight_reason = "Нет завершённых обычных занятий этой базы: стартовый вес округлён к шагу."
+    reps_reason = "Нижняя граница настроенного диапазона."
+    if history:
+        last = history[0]
+        results = [r for r in last.results if r.is_working]
+        weight_code = "median"
+        weight_reason = "Медиана первых рабочих весов выбранных занятий, округлённая к шагу. Для занятия без рабочих подходов используется его плановый вес."
+        if week.phase_type == "deload":
+            weight_code, action = "deload", "Легкая неделя: вес без повышения"
+            weight_reason += " Лёгкая неделя: повышения нет."
+        elif reentry:
+            weight_code, action = "reentry", "Возвращение после легкой недели: вес без повышения"
+            weight_reason += " Возвращение: повышения нет."
+        elif results and len(results) == last.sets_count and all(
+                r.reps >= maximum and r.rir_reported is not None and float(r.rir_reported) >= 1 for r in results):
+            weight = round_to_step(base + step, step)
+            weight_code, action = "increase_step", "Верх диапазона: +1 шаг веса"
+            weight_reason += " В последнем занятии все назначенные рабочие подходы достигли верха диапазона с ПДО ≥ 1: плюс один шаг. Равенство весов подходов не требуется."
+        elif results and all(r.rir_reported is not None and float(r.rir_reported) >= 1 for r in results):
+            reps_median = median(r.reps for r in results)
+            # Only the automatic target is bounded. Facts and explicit manual
+            # targets may legitimately be outside the configured rep range.
+            reps = max(minimum, min(maximum, round(reps_median) + 1))
+            reps_code, action = "increase_reps", "Добавить повторение"
+            reps_reason = "Медиана рабочих повторов последнего занятия округлена к ближайшему целому (половины к чётному), плюс один; результат ограничен настроенным диапазоном."
+        else:
+            reps_code, action = "insufficient_rir", "Сохранить вес: проверить восстановление"
+            reps_reason = "Нет рабочих результатов либо хотя бы один ПДО неизвестен или ниже 1: нижняя граница повторов."
+    return {"weight_value": weight, "reps_value": reps, "action": action, "history": evidence,
+            "weight": {"reason_code": weight_code, "reason": weight_reason, "median": raw_median,
+                       "rounded_base": base, "step": step},
+            "reps": {"reason_code": reps_code, "reason": reps_reason, "median": reps_median}}
 
 
-def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, int]:
+def prescription(db: Session, exercise: Exercise, week: TrainingWeek, reentry: bool) -> tuple[float, int, str]:
+    result = prescription_details(db, exercise, week, reentry)
+    return result["weight_value"], result["reps_value"], result["action"]
+
+
+def recommendation_context(db: Session, exercise: Exercise, week: TrainingWeek, reentry: bool, sets: dict) -> dict:
+    result = prescription_details(db, exercise, week, reentry)
+    source = "deload" if week.phase_type == "deload" else "reentry" if reentry else "accumulation"
+    rir = 4.0 if source == "deload" else 2.5 if source == "reentry" else float(week.target_rir)
+    reason = {"deload": "Лёгкая фаза: ПДО 4, в том числе при двух лёгких неделях подряд.",
+              "reentry": "Возвращение в обычную фазу после непропущенной лёгкой недели: ПДО 2,5.",
+              "accumulation": "Цель обычной недели; настройка упражнения на неё не влияет."}[source]
+    return {"version": 1, "rules_version": "2", "created_at": utcnow().isoformat(),
+            "inputs": {"start_weight": float(exercise.medium_weight), "weight_step": float(exercise.weight_step),
+                       "rep_min": exercise.rep_min or exercise.medium_min, "rep_max": exercise.rep_max or exercise.medium_max,
+                       "base_sets": exercise.sets_count},
+            "history": result["history"], "weight": result["weight"], "reps": result["reps"],
+            "sets": sets, "rir": {"source": source, "reason": reason},
+            "calculated": {"weight": result["weight_value"], "reps": result["reps_value"],
+                           "sets_count": sets["value"], "rir": rir},
+            "manual_override": {}, "action_label": result["action"]}
+
+
+def planned_counts(db: Session, user_id: int, week: TrainingWeek, details: dict | None = None) -> dict[str, int]:
     templates = list(db.scalars(select(WorkoutTemplate).where(
         WorkoutTemplate.user_id == user_id, WorkoutTemplate.active.is_(True))))
     exercises = [e for t in templates for e in t.exercises if e.active and movement_for(db, e, user_id).kind == "strength"]
     counts = {e.id: e.sets_count for e in exercises}
+    trace = {e.id: {"base": e.sets_count, "reason_code": "base",
+                    "reason": "Базовое число подходов из программы."} for e in exercises}
+    def explain(code: str, reason: str) -> None:
+        for item in trace.values():
+            item.update(reason_code=code, reason=reason)
     movements = {e.id: movement_for(db, e, user_id) for e in exercises}
     def volume(group: str) -> float:
         return sum(counts[e.id] * (1 if movements[e.id].primary_group == group else
@@ -216,6 +279,8 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
     targets = json.loads(week.targets_json or "{}")
     default_cap = db.get(User, user_id).volume_cap
     def enforce_limits(deload: bool = False) -> dict[str, int]:
+        before_counts = counts.copy()
+        before_volumes = {group: volume(group) for group in groups}
         for group in sorted(groups):
             limit = 8 if deload else targets.get(group, [12, 18, default_cap])[2]
             candidates = sorted((e for e in exercises if movements[e.id].primary_group == group
@@ -224,9 +289,21 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
             while volume(group) > limit and any(counts[e.id] > 1 for e in candidates):
                 candidate = next(e for e in candidates if counts[e.id] > 1)
                 counts[candidate.id] -= 1
+        if details is not None:
+            for e in exercises:
+                movement = movements[e.id]
+                own_groups = {movement.primary_group, *split_details(movement.secondary_groups)} & groups
+                item = {**trace[e.id], "value": counts[e.id], "before_limits": before_counts[e.id],
+                        "limited": counts[e.id] != before_counts[e.id],
+                        "limits": [{"group": group, "cap": 8 if deload else targets.get(group, [12, 18, default_cap])[2],
+                                    "before": before_volumes[group], "after": volume(group)} for group in sorted(own_groups)]}
+                if item["limited"]:
+                    item["reason"] += " Число уменьшено до недельных пределов нагрузки мышц; учитываются также вторичные мышцы."
+                details[e.id] = item
         return counts
     if week.phase_type == "deload":
         counts = {e.id: max(1, round(e.sets_count * 0.5)) for e in exercises}
+        explain("deload", "Лёгкая неделя: половина базовых подходов с округлением к ближайшему целому (половины к чётному), минимум один; недельный предел 8 на мышцу.")
         return enforce_limits(deload=True)
     prior = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < week.week_start,
@@ -234,23 +311,33 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
     ).order_by(TrainingWeek.week_start.desc()))
     if prior and prior.phase_type == "deload" and not prior.missed_deload:
         counts = {e.id: min(e.sets_count, max(1, round(e.sets_count * 0.5) + 1)) for e in exercises}
+        explain("reentry", "Возвращение: половина базовых подходов с округлением плюс один, не больше базового числа.")
         return enforce_limits()
     if week.week_number < 2 or not prior:
+        explain("base", "Начало блока или нет предыдущей тренировочной недели: базовые подходы.")
         return enforce_limits()
     before_prior = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < prior.week_start,
         TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
     if week.week_number == 2 and before_prior and before_prior.phase_type == "deload" and not before_prior.missed_deload:
+        explain("reentry_hold", "Вторая неделя после разгрузки: базовые подходы без недельной прибавки.")
         return enforce_limits()
     if prior.feeling_beat_up:
         if before_prior and before_prior.feeling_beat_up:
             counts = {e.id: max(1, round(e.sets_count * 0.75)) for e in exercises}
+            explain("recovery_reduce", "Две недели подряд отмечено тяжело/болит: 75% базовых подходов с округлением, минимум один.")
+        else:
+            explain("recovery_hold", "На предыдущей неделе отмечено тяжело/болит: базовые подходы без роста.")
         return enforce_limits()
     stats = week_stats(db, user_id, prior.week_start)
     completed_templates = {s.template_id for s in stats["sessions"]}
-    if (stats["avg_rir"] is None or stats["avg_rir"] < 1 or declining_anchor(db, user_id)
-            or any(t.id not in completed_templates for t in templates)):
+    decline = declining_anchor(db, user_id)
+    missing_days = [t.id for t in templates if t.id not in completed_templates]
+    if stats["avg_rir"] is None or stats["avg_rir"] < 1 or decline or missing_days:
+        explain("insufficient_week", "Недельная прибавка не разрешена: неизвестен/низок средний ПДО, снижается якорное упражнение или завершены не все дни. Используются базовые подходы.")
+        for item in trace.values():
+            item["checks"] = {"avg_rir": stats["avg_rir"], "declining_anchor": decline, "missing_days": missing_days}
         return enforce_limits()
     selected_ids = {(slot_id(e), history_id(e), e.movement_id, "strength"): e.id for e in exercises}
     for session in stats["sessions"]:
@@ -258,6 +345,8 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
             current_id = selected_ids.get(snapshot_key(item))
             if current_id is not None and not item.skipped:
                 counts[current_id] = item.sets_count
+                trace[current_id].update(reason_code="carry", reason="Сохранено число подходов сопоставимого занятия предыдущей недели.",
+                                         previous_sets=item.sets_count, previous_session_id=session.id)
     by_group = defaultdict(list)
     for e in exercises:
         movement = movements[e.id]
@@ -268,7 +357,12 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek) -> dict[str, i
         options.sort(key=lambda pair: (not pair[1].is_anchor, pair[0].position, slot_id(pair[0])))
         if volume(group) < cap:
             candidate = options[(week.week_number - 2) % len(options)][0]
+            previous_count = counts[candidate.id]
             counts[candidate.id] = min(12, counts[candidate.id] + 1)
+            if counts[candidate.id] > previous_count:
+                trace[candidate.id].update(reason_code="progression", reason="Недельные условия роста выполнены: выбранному упражнению основной мышцы добавлен один подход, максимум 12.")
+            else:
+                trace[candidate.id].update(reason_code="max_sets", reason="Недельные условия роста выполнены, но упражнение уже достигло предела 12 подходов: прибавки нет.")
     return enforce_limits()
 
 
@@ -279,6 +373,8 @@ def next_set_suggestion(item: SessionExercise, step: float) -> dict | None:
     if not results or len(results) >= item.sets_count:
         return None
     last = results[-1]
+    if last.set_index >= item.sets_count:
+        return None
     if last.rir_reported is None or item.target_rir is None:
         return None
     difference = float(last.rir_reported) - float(item.target_rir)
@@ -289,11 +385,16 @@ def next_set_suggestion(item: SessionExercise, step: float) -> dict | None:
     elif difference <= -2:
         weight = max(0, weight - 2 * step)
         reason = "ПДО ниже цели: снизить вес"
+    elif difference >= 2 and item.session.phase_type == "deload":
+        reason = "Лёгкая неделя: повышение веса отключено"
     else:
         reason = "Вес в целевом коридоре"
     reps = max(item.min_reps, min(item.max_reps, last.reps - 1 if difference <= -1 else item.target_reps))
     return {"set_index": last.set_index + 1, "weight": round_to_step(weight, step),
-            "reps": reps, "rir_target": float(item.target_rir), "reason": reason}
+            "reps": reps, "rir_target": float(item.target_rir), "reason": reason,
+            "basis": {"set_index": last.set_index, "weight": float(last.weight), "reps": last.reps,
+                      "rir_reported": float(last.rir_reported), "target_rir": float(item.target_rir),
+                      "weight_step": step, "rir_difference": difference}}
 
 
 def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date) -> WorkoutSession | None:
@@ -318,12 +419,13 @@ def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date)
     exercises = [e for e in template.exercises if e.active]
     if not exercises:
         return None
-    counts = planned_counts(db, template.user_id, week)
+    count_details = {}
+    planned_counts(db, template.user_id, week, count_details)
     prior = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == template.user_id, TrainingWeek.week_start < week.week_start,
         TrainingWeek.phase_type != "vacation",
     ).order_by(TrainingWeek.week_start.desc()))
-    reentry = bool(prior and prior.phase_type == "deload" and not prior.missed_deload)
+    reentry = bool(week.phase_type == "accumulation" and prior and prior.phase_type == "deload" and not prior.missed_deload)
     session = WorkoutSession(user_id=template.user_id, template_id=template.id,
         template_name=template.name, muscle_group=template.muscle_group,
         scheduled_date=on_date, phase=1, phase_type=week.phase_type, week_id=week.id)
@@ -332,16 +434,20 @@ def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date)
     for e in exercises:
         movement = movement_for(db, e, template.user_id)
         timed = movement.kind != "strength"
-        weight, reps, action = (0, 0, "Цель по времени") if timed else prescription(db, e, week, reentry)
-        db.add(SessionExercise(session_id=session.id, exercise_id=e.id,
+        context = None if timed else recommendation_context(db, e, week, reentry, count_details[e.id])
+        calculated = context["calculated"] if context else {"weight": 0, "reps": 0, "sets_count": 0, "rir": None}
+        item = SessionExercise(session_id=session.id, exercise_id=e.id,
             movement_id=movement.id, name=movement.name, position=e.position,
             kind=movement.kind, target_duration_minutes=e.duration_minutes if timed else None,
             weight_step=None if timed else e.weight_step,
-            sets_count=0 if timed else counts[e.id], target_weight=weight, target_reps=reps,
+            sets_count=calculated["sets_count"], target_weight=calculated["weight"], target_reps=calculated["reps"],
             min_reps=0 if timed else (e.rep_min or e.medium_min), max_reps=0 if timed else (e.rep_max or e.medium_max),
-            target_rir=None if timed else (2.5 if reentry else week.target_rir),
+            target_rir=calculated["rir"],
             primary_group=movement.primary_group, secondary_groups=movement.secondary_groups,
-            is_anchor=movement.is_anchor, action_label=action))
+            is_anchor=movement.is_anchor, action_label=context["action_label"] if context else "Цель по времени")
+        if context is not None:
+            save_recommendation(item, context)
+        db.add(item)
     try:
         db.commit()
     except IntegrityError:

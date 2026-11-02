@@ -86,3 +86,11 @@ def migrate(engine):
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_exercises_active_slot ON exercises (slot_id) WHERE active AND slot_id IS NOT NULL"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_exercises_history_id ON exercises (history_id)"))
             connection.execute(text("INSERT INTO schema_versions (version) VALUES (5)"))
+        if version < 6:
+            inspector.clear_cache()
+            existing = {column["name"] for column in inspector.get_columns("session_exercises")}
+            if "recommendation_context_json" not in existing:
+                connection.execute(text("ALTER TABLE session_exercises ADD COLUMN recommendation_context_json TEXT"))
+            # The inputs behind an old plan are unknown, even when its targets
+            # and short action label survive. Never reconstruct them from today.
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (6)"))

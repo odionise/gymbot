@@ -2,6 +2,7 @@ from .models import Exercise, Movement, SessionExercise, WorkoutSession, Workout
 from .history import history_id, slot_id
 from .muscles import split_details
 from .planning import PHASES, next_set_suggestion
+from .recommendations import recommendation_dict
 
 
 def movement_dict(item: Movement, is_used: bool = False) -> dict:
@@ -21,7 +22,7 @@ def exercise_dict(item: Exercise) -> dict:
         "heavy_max": item.heavy_max,
         "movement_id": item.movement_id, "rep_min": item.rep_min or item.medium_min,
         "rep_max": item.rep_max or item.medium_max,
-        "rir_target": float(item.rir_target or 2),
+        "rir_target": float(item.rir_target) if item.rir_target is not None else None,
         "duration_minutes": item.duration_minutes,
     }
 
@@ -49,6 +50,7 @@ def session_exercise_dict(item: SessionExercise) -> dict:
         "secondary_groups": split_details(item.secondary_groups), "is_anchor": item.is_anchor,
         "target_rir": float(item.target_rir) if item.target_rir is not None else None,
         "action_label": item.action_label, "next_set": next_set_suggestion(item, step) if step is not None else None,
+        "recommendation": recommendation_dict(item),
         "results": [
             {"set_index": result.set_index, "weight": float(result.weight), "reps": result.reps,
              "rir_reported": float(result.rir_reported) if result.rir_reported is not None else None,

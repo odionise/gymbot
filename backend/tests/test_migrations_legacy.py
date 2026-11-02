@@ -13,7 +13,7 @@ from app.main import history
 from app.migrations import migrate
 from app.models import Exercise, User
 
-# Column contract from the original models at 8745307 (before migrations 1–5).
+# Column contract from the original models at 8745307 (before migrations 1–6).
 # Types and FK targets for these unchanged legacy fields come from the models.
 LEGACY_COLUMNS = {
     "users": "telegram_id chat_id timezone created_at",
@@ -169,13 +169,14 @@ def test_complete_legacy_graph_survives_migration_and_reapplication(legacy_engin
         migrate(legacy_engine)
         assert legacy_rows(legacy_engine, metadata) == before
         with legacy_engine.connect() as connection:
-            assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5]
+            assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5, 6]
             assert list(connection.execute(text("SELECT rir_reported, rir_target FROM set_results"))) == [(None, None), (None, None)]
             assert connection.execute(text("SELECT movement_id FROM session_exercises")).scalar() is None
             assert connection.execute(text("SELECT actual_date FROM workout_sessions")).scalar() is None
             assert connection.execute(text("SELECT SUM(weight * reps) FROM set_results")).scalar() == 875
             assert tuple(connection.execute(text("SELECT slot_id, history_id FROM exercises")).one()) == ("legacy-exercise", "legacy-exercise")
             assert connection.execute(text("SELECT weight_step FROM session_exercises")).scalar() is None
+            assert connection.execute(text("SELECT recommendation_context_json FROM session_exercises")).scalar() is None
         assert "duration_minutes" in {column["name"] for column in inspect(legacy_engine).get_columns("exercises")}
         with Session(legacy_engine) as db:
             recorded = history(db.get(User, 9001), db)
@@ -224,7 +225,8 @@ def test_version_four_upgrade_preserves_existing_facts_and_unknown_step(legacy_e
         connection.execute(text("ALTER TABLE exercises DROP COLUMN slot_id"))
         connection.execute(text("ALTER TABLE exercises DROP COLUMN history_id"))
         connection.execute(text("ALTER TABLE session_exercises DROP COLUMN weight_step"))
-        connection.execute(text("DELETE FROM schema_versions WHERE version = 5"))
+        connection.execute(text("ALTER TABLE session_exercises DROP COLUMN recommendation_context_json"))
+        connection.execute(text("DELETE FROM schema_versions WHERE version >= 5"))
     backup_metadata = MetaData()
     backup_metadata.reflect(legacy_engine)
     complete_before = legacy_rows(legacy_engine, backup_metadata)
@@ -252,6 +254,7 @@ def test_version_four_upgrade_preserves_existing_facts_and_unknown_step(legacy_e
                 assert len(rows) == 2
                 assert all(identity == slot == history_id for identity, slot, history_id in rows)
                 assert connection.execute(text("SELECT weight_step FROM session_exercises")).scalar() is None
-                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5]
+                assert connection.execute(text("SELECT recommendation_context_json FROM session_exercises")).scalar() is None
+                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5, 6]
             assert any(item["unique"] and item["column_names"] == ["slot_id"]
                        for item in inspect(legacy_engine).get_indexes("exercises"))

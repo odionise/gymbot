@@ -28,11 +28,12 @@ export interface Exercise {
   movement_id: string | null
   rep_min: number
   rep_max: number
-  rir_target: number
+  /** Legacy setting; the workout target is chosen by phase and reentry. */
+  rir_target: number | null
   duration_minutes: number | null
 }
 
-export type ExerciseInput = Omit<Exercise, 'id' | 'slot_id' | 'history_id'>
+export type ExerciseInput = Omit<Exercise, 'id' | 'slot_id' | 'history_id' | 'rir_target'>
 
 export interface ExerciseHistoryOption {
   history_id: string
@@ -84,6 +85,27 @@ export interface SetResult {
   is_hard_set: boolean
 }
 
+export interface Recommendation {
+  version: 1
+  rules_version: '2' | null
+  created_at?: string
+  inputs?: { start_weight: number; weight_step: number; rep_min: number; rep_max: number; base_sets: number }
+  history?: {
+    session_id: string; session_exercise_id: string; date: string; completed_at: string | null
+    base_weight: number; weight_source: 'first_working' | 'planned'; planned_sets: number
+    working_sets: { set_index: number; weight: number; reps: number; rir: number | null }[]
+  }[]
+  weight?: { reason_code: string; reason: string; median: number | null; rounded_base: number; step: number }
+  reps?: { reason_code: string; reason: string; median: number | null }
+  sets?: {
+    reason_code: string; reason: string; base: number; before_limits: number; limited: boolean
+    limits: { group: string; cap: number; before: number; after: number }[]
+  }
+  rir?: { source: 'accumulation' | 'deload' | 'reentry'; reason: string }
+  calculated: { weight: number; reps: number; sets_count: number; rir: number } | null
+  manual_override: { weight?: number; reps?: number; sets_count?: number } | null
+}
+
 export interface SessionExercise {
   id: string
   exercise_id: string
@@ -105,7 +127,11 @@ export interface SessionExercise {
   is_anchor: boolean
   target_rir: number | null
   action_label: string | null
-  next_set: { set_index: number; weight: number; reps: number; rir_target: number; reason: string } | null
+  recommendation: Recommendation | null
+  next_set: {
+    set_index: number; weight: number; reps: number; rir_target: number; reason: string
+    basis?: { set_index: number; weight: number; reps: number; rir_reported: number; target_rir: number; weight_step: number; rir_difference: number }
+  } | null
   results: SetResult[]
 }
 

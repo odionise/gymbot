@@ -50,7 +50,7 @@ class ExerciseIn(BaseModel):
     movement_id: str | None = None
     rep_min: int | None = Field(default=None, ge=1, le=50)
     rep_max: int | None = Field(default=None, ge=1, le=50)
-    rir_target: float = Field(default=2, ge=0, le=6, multiple_of=0.5)
+    rir_target: float | None = Field(default=2, ge=0, le=6, multiple_of=0.5, deprecated=True)
     duration_minutes: int | None = Field(default=None, ge=1, le=600)
 
     @model_validator(mode="after")
