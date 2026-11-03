@@ -19,7 +19,8 @@ TEST_TOKEN = "test-only-key-never-a-real-bot-token"
 
 def signed_header(user_id, clock, auth_date=None):
     fields = {"auth_date": str(int(clock.moment.timestamp()) if auth_date is None else auth_date),
-              "user": json.dumps({"id": user_id}, separators=(",", ":"))}
+              "user": json.dumps({"id": user_id}, separators=(",", ":")),
+              "query_id": "synthetic-query", "signature": "synthetic-Ed25519-signature"}
     check = "\n".join(f"{key}={value}" for key, value in sorted(fields.items()))
     secret = hmac.new(b"WebAppData", TEST_TOKEN.encode(), hashlib.sha256).digest()
     fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()

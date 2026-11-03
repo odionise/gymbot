@@ -18,7 +18,8 @@ def verify_init_data(raw: str, token: str, now: int | None = None) -> int:
         raise ValueError("Missing Telegram authentication")
     pairs = dict(parse_qsl(raw, keep_blank_values=True, strict_parsing=True))
     received_hash = pairs.pop("hash", "")
-    pairs.pop("signature", None)
+    # Bot-token HMAC covers every field except hash, including signature.
+    # Excluding signature belongs to Telegram's separate Ed25519 protocol.
     check_string = "\n".join(f"{key}={value}" for key, value in sorted(pairs.items()))
     secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
     expected_hash = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()

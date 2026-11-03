@@ -42,6 +42,8 @@ class FakeTelegram:
         self.identity = SimpleNamespace(username=username, id=bot_id)
         self.hook = hook
         self.writes = []
+        self.menus = {}
+        self.menu_writes = []
 
     async def get_me(self):
         return self.identity
@@ -57,6 +59,15 @@ class FakeTelegram:
     async def delete_webhook(self, **kwargs):
         self.writes.append(("delete", kwargs))
         self.hook = ""
+        return True
+
+    async def get_chat_menu_button(self, *, chat_id):
+        url = self.menus.get(chat_id, "")
+        return SimpleNamespace(web_app=SimpleNamespace(url=url))
+
+    async def set_chat_menu_button(self, *, chat_id, menu_button):
+        self.menu_writes.append((chat_id, menu_button.web_app.url))
+        self.menus[chat_id] = menu_button.web_app.url + "/"
         return True
 
 
@@ -401,6 +412,7 @@ def test_start_registers_only_after_public_health(launcher, stand_config, tmp_pa
     monkeypatch.setattr(launcher, "configure_logging", lambda *args: None)
     monkeypatch.setattr(launcher, "verify_test_bot", verify)
     monkeypatch.setattr(launcher, "register_test_webhook", register)
+    monkeypatch.setattr(launcher, "private_chat_ids", lambda *args: [])
     monkeypatch.setattr(launcher, "download_tunnel", lambda root: root / "synthetic-cloudflared.exe")
     monkeypatch.setattr(launcher, "spawn_logged", spawn)
     monkeypatch.setattr(launcher, "process_identity", lambda pid: {"pid": pid})
@@ -554,6 +566,94 @@ def test_cleanup_of_already_disconnected_verified_test_bot_is_successful(launche
              "webhook_url": "https://synthetic.trycloudflare.com/telegram/webhook"}
     assert asyncio.run(launcher.clear_test_webhook(bot, state)) is True
     assert bot.writes == []
+
+
+def registered_test_bot():
+    url = "https://current-test.trycloudflare.com"
+    return {"bot_id": 111111, "username": USERNAME, "public_url": url,
+            "webhook_url": url + "/telegram/webhook"}
+
+
+def test_menu_moves_to_new_tunnel_with_normalized_readback_and_no_messages(launcher):
+    state = registered_test_bot()
+    old = "https://previous-test.trycloudflare.com"
+    bot = FakeTelegram(hook=state["webhook_url"])
+    bot.menus[100] = old + "/"
+    result = asyncio.run(launcher.refresh_test_menus(bot, state, [100, 100], old))
+    assert result == {"updated": 1, "unchanged": 0, "skipped": 0}
+    assert bot.menu_writes == [(100, state["public_url"])]
+    assert bot.writes == []  # No webhook mutation or messages from menu refresh.
+    result = asyncio.run(launcher.refresh_test_menus(bot, state, [100], old))
+    assert result == {"updated": 0, "unchanged": 1, "skipped": 0}
+    assert len(bot.menu_writes) == 1
+
+
+def test_menu_preserves_foreign_urls_and_updates_only_known_or_default_menus(launcher):
+    state = registered_test_bot()
+    old = "https://previous-test.trycloudflare.com"
+    bot = FakeTelegram(hook=state["webhook_url"])
+    bot.menus = {100: "https://foreign.invalid/app", 200: old, 300: ""}
+    result = asyncio.run(launcher.refresh_test_menus(bot, state, [100, 200, 300], old))
+    assert result == {"updated": 2, "unchanged": 0, "skipped": 1}
+    assert bot.menus[100] == "https://foreign.invalid/app"
+    assert bot.menu_writes == [(200, state["public_url"]), (300, state["public_url"])]
+
+
+@pytest.mark.parametrize("chat_id", [0, -100, True, "100"])
+def test_menu_rejects_invalid_private_chat_ids_before_changes(launcher, chat_id):
+    state = registered_test_bot()
+    bot = FakeTelegram(hook=state["webhook_url"])
+    with pytest.raises(launcher.TestStandError, match="private chat"):
+        asyncio.run(launcher.refresh_test_menus(bot, state, [chat_id]))
+    assert bot.menu_writes == []
+
+
+@pytest.mark.parametrize("url", ["https://foreign.invalid", "http://current-test.trycloudflare.com"])
+def test_menu_rejects_non_owned_tunnel_urls(launcher, url):
+    state = registered_test_bot()
+    state["public_url"] = url
+    bot = FakeTelegram(hook=state["webhook_url"])
+    with pytest.raises(launcher.TestStandError, match="registered test tunnel"):
+        asyncio.run(launcher.refresh_test_menus(bot, state, [100]))
+    assert bot.menu_writes == []
+
+
+@pytest.mark.parametrize("username,bot_id,hook", [
+    ("main_bot", 111111, ""),
+    (USERNAME, 222222, ""),
+    (USERNAME, 111111, "https://foreign.invalid/webhook"),
+])
+def test_menu_refuses_another_bot_or_hook(launcher, username, bot_id, hook):
+    bot = FakeTelegram(username=username, bot_id=bot_id, hook=hook)
+    with pytest.raises(launcher.TestStandError):
+        asyncio.run(launcher.refresh_test_menus(bot, registered_test_bot(), [100]))
+    assert bot.menu_writes == []
+
+
+def test_menu_rechecks_hook_after_reading_the_previous_button(launcher):
+    class ChangedHook(FakeTelegram):
+        async def get_chat_menu_button(self, *, chat_id):
+            self.hook = "https://foreign.invalid/webhook"
+            return await super().get_chat_menu_button(chat_id=chat_id)
+
+    state = registered_test_bot()
+    bot = ChangedHook(hook=state["webhook_url"])
+    with pytest.raises(launcher.TestStandError):
+        asyncio.run(launcher.refresh_test_menus(bot, state, [100]))
+    assert bot.menu_writes == []
+
+
+def test_menu_requires_confirmed_url_after_update(launcher):
+    class UnconfirmedMenu(FakeTelegram):
+        async def set_chat_menu_button(self, *, chat_id, menu_button):
+            self.menu_writes.append((chat_id, menu_button.web_app.url))
+            return True  # Telegram readback still has the old/default button.
+
+    state = registered_test_bot()
+    bot = UnconfirmedMenu(hook=state["webhook_url"])
+    with pytest.raises(launcher.TestStandError, match="confirm"):
+        asyncio.run(launcher.refresh_test_menus(bot, state, [100]))
+    assert len(bot.menu_writes) == 1
 
 
 def test_reminder_setting_preserves_default_and_supports_explicit_test_disable(monkeypatch):

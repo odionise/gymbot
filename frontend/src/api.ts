@@ -1,4 +1,5 @@
 import type { Exercise, ExerciseHistoryOptions, ExerciseInput, Me, Movement, MovementInput, MuscleTarget, NextWeek, Progress, ReplacementInput, ReplacementResult, Template, WorkoutSession } from './types'
+import { fetchApi } from './apiTransport'
 
 declare global {
   interface Window {
@@ -18,7 +19,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   else if (devId) headers['X-Dev-User-Id'] = devId
   let response: Response
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetchApi(`/api${path}`, {
       ...options,
       headers: { ...headers, ...(options.headers as Record<string, string> | undefined) },
     })

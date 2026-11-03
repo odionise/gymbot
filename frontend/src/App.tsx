@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import { HistoryView } from './HistoryView'
 import { ProgramView } from './ProgramView'
@@ -126,10 +126,31 @@ function HomeFaq() {
   </section>
 }
 
+function ProgramLoadError({ cachedAt, onRetry }: { cachedAt: string | null; onRetry: () => void }) {
+  return <div className="emptyCard" role="status">
+    <h2>{cachedAt ? 'Не удалось обновить программу' : 'Программа не загрузилась'}</h2>
+    <p>{cachedAt ? `Показана последняя загруженная версия: ${new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }).format(new Date(cachedAt))}.` : 'Проверьте соединение и повторите загрузку.'}</p>
+    <button className="outlineButton" onClick={onRetry}>Повторить загрузку</button>
+  </div>
+}
+
+export function ProgramPanel({ templates, loadedAt, error, onRetry, run }: {
+  templates: Template[]; loadedAt: string | null; error: string; onRetry: () => void;
+  run: (action: () => Promise<unknown>) => Promise<void>
+}) {
+  return <>
+    {error && <ProgramLoadError cachedAt={loadedAt} onRetry={onRetry} />}
+    {loadedAt ? <ProgramView templates={templates} run={run} /> : !error && <div className="emptyCard">Загружаем программу…</div>}
+  </>
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('today')
   const [me, setMe] = useState<Me | null>(null)
   const [templates, setTemplates] = useState<Template[]>([])
+  const [programLoadedAt, setProgramLoadedAt] = useState<string | null>(null)
+  const [programError, setProgramError] = useState('')
+  const programRequestVersion = useRef(0)
   const [sessions, setSessions] = useState<WorkoutSession[]>([])
   const [completedToday, setCompletedToday] = useState<WorkoutSession[]>([])
   const [selected, setSelected] = useState<WorkoutSession | null>(null)
@@ -139,12 +160,27 @@ export default function App() {
   const [weekMenuOpen, setWeekMenuOpen] = useState(false)
 
   const refresh = useCallback(async () => {
-    const [profile, program, today, history, upcoming] = await Promise.all([api.me(), api.templates(), api.today(), api.history(), api.nextWeek()])
+    const version = ++programRequestVersion.current
+    const programRequest = api.templates().then(program => {
+      if (version !== programRequestVersion.current) return
+      setTemplates(program)
+      setProgramLoadedAt(new Date().toISOString())
+      setProgramError('')
+    }).catch((err: Error) => {
+      if (version === programRequestVersion.current) setProgramError(err.message)
+      throw err
+    })
+    // A failure in today's plan must not discard an already loaded program.
+    const loaded = await Promise.all([api.me(), programRequest, api.today(), api.history(), api.nextWeek()]).catch(err => {
+      if (version === programRequestVersion.current) throw err
+      return null
+    })
+    if (!loaded || version !== programRequestVersion.current) return
+    const [profile, , today, history, upcoming] = loaded
     const dateParts = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: profile.timezone }).formatToParts(new Date())
     const part = (type: string) => dateParts.find(item => item.type === type)?.value ?? ''
     const localDate = `${part('year')}-${part('month')}-${part('day')}`
     setMe(profile)
-    setTemplates(program)
     setSessions(today)
     setCompletedToday(history.filter(item => (item.actual_date ?? item.scheduled_date) === localDate))
     setNextWeek(upcoming)
@@ -181,6 +217,11 @@ export default function App() {
     await run(async () => { setSelected(await api.start(id)); setTab('today') })
   }
 
+  const retryLoad = () => {
+    setError('')
+    refresh().catch((err: Error) => setError(err.message))
+  }
+
   if (loading) return <div className="loading"><span className="loadingMark" />Загружаем тренировку<span className="loadingDots">…</span></div>
 
   const todayLabel = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', weekday: 'long', timeZone: me?.timezone || 'Europe/Moscow' }).format(new Date())
@@ -209,8 +250,9 @@ export default function App() {
             <button className="heroFooter" onClick={() => openSession(session.id)}><span>{session.status === 'in_progress' ? 'Продолжить тренировку' : 'Начать тренировку'}</span><span aria-hidden="true">→</span></button>
           </article>
         )}</div> : error ? <div className="emptyCard"><div className="emptyIcon">!</div><span className="emptyOverline">Данные недоступны</span><h2>План не загрузился.</h2><p>Проверьте соединение и попробуйте ещё раз.</p><button className="outlineButton" onClick={() => { setError(''); refresh().catch((err: Error) => setError(err.message)) }}>Повторить загрузку</button></div> : completedToday.length ? <div className="completedSession"><div className="completedTop"><span>Тренировка завершена</span><span className="completedSymbol" aria-hidden="true">✓</span></div><h2>{completedToday.map(item => item.template_name).join(' · ')}</h2><p>{completedSets} записанных результатов</p><button onClick={() => setTab('history')}>Посмотреть результаты <span aria-hidden="true">→</span></button></div> : <div className="emptyCard"><div className="emptyIcon">—</div><span className="emptyOverline">Пауза в расписании</span><h2>Сегодня без тренировки.</h2><p>План можно открыть вручную, если это не неделя отпуска.</p></div>}
-        <div className="sectionHead"><h2>Ваши тренировки</h2><span>{templates.length}</span></div>
-        {templates.length ? <div className="templateList">{templates.map((template, index) =>
+        <div className="sectionHead"><h2>Ваши тренировки</h2><span>{programLoadedAt ? templates.length : 'н/д'}</span></div>
+        {programError && <ProgramLoadError cachedAt={programLoadedAt} onRetry={retryLoad} />}
+        {!programLoadedAt ? !programError && <div className="emptyCard">Загружаем программу…</div> : templates.length ? <div className="templateList">{templates.map((template, index) =>
           <div className="templateMini" key={template.id}>
             <span className="templateOrder">{index + 1}</span>
             <div className="templateDetails"><strong>{template.name}</strong><small>{completedToday.some(item => item.template_id === template.id) ? 'Завершено сегодня' : `${weekdays[template.weekday]} · ${template.send_time}`}</small></div>
@@ -219,7 +261,7 @@ export default function App() {
         )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу</button>}
         {me && !me.has_started_bot && <p className="hint">Чтобы получать сообщения, сначала отправьте боту команду /start.</p>}
         <HomeFaq />
-      </> : tab === 'program' ? <ProgramView templates={templates} run={run} />
+      </> : tab === 'program' ? <ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} />
         : tab === 'progress' ? <ProgressView />
           : <HistoryView />}
     </main>

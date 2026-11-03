@@ -257,6 +257,56 @@ async def clear_test_webhook(bot, state):
     return bool(await bot.delete_webhook())
 
 
+def private_chat_ids(root, cfg):
+    from telegram_test_pg import _connection
+    # The connection helper verifies the owned PGDATA and private credentials.
+    # No user/workout is created while discovering existing private chats.
+    with _connection(root, cfg, cfg["db_name"]) as connection:
+        connection.execute("BEGIN READ ONLY")
+        rows = connection.execute(
+            "SELECT chat_id FROM users WHERE chat_id = telegram_id AND chat_id > 0"
+        ).fetchall()
+        connection.rollback()
+    return [row[0] for row in rows]
+
+
+async def refresh_test_menus(bot, registered, chat_ids, previous_url=""):
+    from aiogram.types import MenuButtonWebApp, WebAppInfo
+
+    target = registered.get("public_url", "")
+    if not URL_PATTERN.fullmatch(target) or registered.get("webhook_url") != target + "/telegram/webhook":
+        raise TestStandError("Refusing a menu URL outside the registered test tunnel")
+    if any(isinstance(chat_id, bool) or not isinstance(chat_id, int) or chat_id <= 0 for chat_id in chat_ids):
+        raise TestStandError("Only existing positive private chat IDs are allowed")
+    permitted = {target}
+    if URL_PATTERN.fullmatch(previous_url or ""):
+        permitted.add(previous_url)
+    current = await verify_test_bot(bot, registered["username"], registered)
+    if current["bot_id"] != registered["bot_id"]:
+        raise TestStandError("Bot identity changed before menu update")
+    result = {"updated": 0, "unchanged": 0, "skipped": 0}
+    for chat_id in sorted(set(chat_ids)):
+        button = await bot.get_chat_menu_button(chat_id=chat_id)
+        old_url = getattr(getattr(button, "web_app", None), "url", "").rstrip("/")
+        if old_url and old_url not in permitted:
+            result["skipped"] += 1  # Preserve menus pointing to another environment.
+            continue
+        if old_url == target:
+            result["unchanged"] += 1
+            continue
+        await verify_test_bot(bot, registered["username"], registered)
+        accepted = await bot.set_chat_menu_button(
+            chat_id=chat_id, menu_button=MenuButtonWebApp(text="Тренировки", web_app=WebAppInfo(url=target))
+        )
+        confirmed = await bot.get_chat_menu_button(chat_id=chat_id)
+        confirmed_url = getattr(getattr(confirmed, "web_app", None), "url", "").rstrip("/")
+        # Telegram normalizes the root URL by adding a trailing slash.
+        if not accepted or confirmed_url != target:
+            raise TestStandError("Telegram did not confirm the test menu URL")
+        result["updated"] += 1
+    return result
+
+
 def process_identity(pid):
     if os.name != "nt":
         raise TestStandError("This local launcher currently supports Windows only")
@@ -520,13 +570,19 @@ def start(root, cfg, offline=False):
             async def register():
                 bot = Bot(bot_cfg["token"])
                 try:
-                    return await register_test_webhook(bot, verified, old, session["public_url"], cfg["webhook_secret"])
+                    registered = await register_test_webhook(bot, verified, old, session["public_url"], cfg["webhook_secret"])
+                    registered["menu_buttons"] = await refresh_test_menus(
+                        bot, registered, private_chat_ids(root, cfg), old.get("public_url", "")
+                    )
+                    return registered
                 finally:
                     await bot.session.close()
             state.update(asyncio.run(register()))
             write_json(root / "processes.json", state)
         print(f'Stand ready: {session["public_url"]}')
         print("Offline, no bot or tunnel" if offline else f'Test bot: @{state["username"]}; automatic reminders disabled')
+        if not offline and state["menu_buttons"]["skipped"]:
+            print("A chat menu belongs to another URL and was preserved; use /start in the intended test chat")
     except BaseException:
         write_json(root / "processes.json", state)
         stop(root, cfg, stop_database=started_here)
