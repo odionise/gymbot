@@ -4,6 +4,7 @@ import { api } from './api'
 import { ChoiceDropdown } from './ChoiceDropdown'
 import { filterMovements, normalizeMovementSearch } from './movementSearch'
 import type { Movement, MovementInput } from './types'
+import { useSubmission } from './useSubmission'
 
 export const movementKinds = { strength: 'Силовое', cardio: 'Кардио', stretch: 'Растяжка', other_timed: 'Другое на время' } as const
 export const timedOptions = [{ value: 'kind:cardio', label: 'Кардио' }, { value: 'kind:stretch', label: 'Растяжка' }, { value: 'kind:other_timed', label: 'Другое на время' }]
@@ -12,6 +13,7 @@ function MovementForm({ movement, muscles, initialMuscle, initialKind = 'strengt
   movement?: Movement; muscles: string[]; initialMuscle: string; initialKind?: Movement['kind'];
   onSave: (data: MovementInput) => Promise<void>; onClose: () => void
 }) {
+  const { busy, submit: saveOnce } = useSubmission()
   const [name, setName] = useState(movement?.name ?? '')
   const [kind, setKind] = useState<Movement['kind']>(movement?.kind ?? initialKind)
   const [primary, setPrimary] = useState(movement?.primary_group ?? initialMuscle)
@@ -21,9 +23,9 @@ function MovementForm({ movement, muscles, initialMuscle, initialKind = 'strengt
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!name.trim() || (kind === 'strength' && !primary)) return
-    await onSave({ name: name.trim(), kind, primary_group: kind === 'strength' ? primary : 'Не применяется', secondary_groups: kind === 'strength' ? secondary : [], is_anchor: kind === 'strength' && anchor })
+    await saveOnce(() => onSave({ name: name.trim(), kind, primary_group: kind === 'strength' ? primary : 'Не применяется', secondary_groups: kind === 'strength' ? secondary : [], is_anchor: kind === 'strength' && anchor }))
   }
-  return <form className="catalogEditor" onSubmit={submit}>
+  return <form className="catalogEditor" onSubmit={submit} aria-busy={busy}><fieldset className="formFields" disabled={busy}>
     <div className="editorTitle"><h3>{movement ? 'Изменить запись справочника' : 'Новое упражнение'}</h3><button type="button" onClick={onClose} aria-label="Закрыть редактор">×</button></div>
     <label className="field"><span>Название</span><input required maxLength={120} value={name} onChange={event => setName(event.target.value)} /></label>
     {movement?.is_used ? <p className="fieldHelp">Тип: {movementKinds[kind]}. Это движение уже использовано в программе или истории. Для другого типа создайте новое движение и выберите «Заменить упражнение».</p> : <ChoiceDropdown label="Тип упражнения" value={kind} options={Object.entries(movementKinds).map(([value, label]) => ({ value, label }))} onChange={value => setKind(value as Movement['kind'])} />}
@@ -36,7 +38,7 @@ function MovementForm({ movement, muscles, initialMuscle, initialKind = 'strengt
     </>}
     {kind !== 'strength' && <p className="fieldHelp">В программе задайте длительность в минутах. Вес, подходы и повторы не нужны; результат не входит в силовые графики.</p>}
     <button className="primaryButton" type="submit" disabled={!name.trim() || (kind === 'strength' && !primary)}>Сохранить упражнение</button>
-  </form>
+  </fieldset></form>
 }
 
 export function MovementCatalog({ movements, detailGroups, refreshMovements, run }: {

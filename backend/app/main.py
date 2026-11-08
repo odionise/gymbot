@@ -7,20 +7,20 @@ from aiogram import Bot
 from aiogram.types import Update
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .analytics import progress_for_user
 from .auth import authenticated_user_id, current_user
 from .bot import dispatcher, reminder_loop
 from .config import get_settings
-from .db import Base, engine, get_db, get_preview_db
+from .db import Base, engine, get_db, get_preview_db, locked_row
 from .migrations import migrate
 from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, new_id, utcnow
-from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used
+from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used, movement_usage
 from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS
-from .planning import get_or_create_session, is_reentry, monday, movement_for, planned_counts, recommendation_context, resolve_week
+from .planning import get_or_create_session, is_reentry, monday, movement_for, planned_counts, recommendation_context, resolve_week, vacation_override
 from .preview import preview_session
 from .recommendations import recommendation_dict, record_manual_target, save_recommendation
 from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
@@ -95,14 +95,13 @@ def current_exercise(db: Session, user: User, exercise_id: str, lock: bool = Fal
         raise HTTPException(404, "Упражнение не найдено")
     owned_template(db, user, item.template_id)
     if lock:
-        template = db.scalar(select(WorkoutTemplate).where(
+        template = locked_row(db, WorkoutTemplate,
             WorkoutTemplate.id == item.template_id, WorkoutTemplate.user_id == user.telegram_id,
             WorkoutTemplate.active.is_(True),
-        ).with_for_update().execution_options(populate_existing=True))
+        )
         if template is None:
             raise HTTPException(404, "Тренировочный день уже удалён")
-        item = db.scalar(select(Exercise).where(Exercise.id == exercise_id)
-                         .with_for_update().execution_options(populate_existing=True))
+        item = locked_row(db, Exercise, Exercise.id == exercise_id, Exercise.template_id == template.id)
     if not item.active:
         raise HTTPException(409, "Назначение уже изменено. Обновите программу перед повторным действием.")
     return item
@@ -110,16 +109,22 @@ def current_exercise(db: Session, user: User, exercise_id: str, lock: bool = Fal
 
 def locked_movement(db: Session, user: User, movement_id: str) -> Movement:
     owned_movement(db, user, movement_id)
-    item = db.scalar(select(Movement).where(
+    item = locked_row(db, Movement,
         Movement.id == movement_id, Movement.user_id == user.telegram_id, Movement.active.is_(True),
-    ).with_for_update().execution_options(populate_existing=True))
+    )
     if item is None:
         raise HTTPException(404, "Движение уже удалено")
     return item
 
 
-def owned_session(db: Session, user: User, session_id: str) -> WorkoutSession:
-    item = db.get(WorkoutSession, session_id)
+def owned_session(db: Session, user: User, session_id: str, *, lock: bool = False) -> WorkoutSession:
+    if lock:
+        # Match calendar creation's lock order: user, then session/template.
+        locked_row(db, User, User.telegram_id == user.telegram_id)
+        item = locked_row(db, WorkoutSession, WorkoutSession.id == session_id,
+                          WorkoutSession.user_id == user.telegram_id)
+    else:
+        item = db.get(WorkoutSession, session_id)
     if not item or item.user_id != user.telegram_id:
         raise HTTPException(404, "Session not found")
     return item
@@ -129,7 +134,9 @@ def owned_session_exercise(db: Session, user: User, item_id: str) -> tuple[Worko
     item = db.get(SessionExercise, item_id)
     if not item:
         raise HTTPException(404, "Exercise not found")
-    return owned_session(db, user, item.session_id), item
+    session = owned_session(db, user, item.session_id, lock=True)
+    db.refresh(item)  # Another request may have changed it before our lock.
+    return session, item
 
 
 @app.get("/health")
@@ -154,7 +161,7 @@ async def telegram_webhook(
 @app.get("/api/me")
 def me(user: User = Depends(current_user)):
     return {"telegram_id": user.telegram_id, "timezone": user.timezone,
-            "volume_cap": user.volume_cap, "has_started_bot": user.chat_id is not None}
+            "volume_cap": user.volume_cap, "has_started_bot": user.chat_id == user.telegram_id}
 
 
 @app.patch("/api/me")
@@ -203,8 +210,9 @@ def update_muscle_target(group: str, data: MuscleTargetIn, user: User = Depends(
 
 @app.get("/api/movements")
 def movements(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return [movement_dict(item, movement_is_used(db, item.id)) for item in db.scalars(select(Movement).where(
-        Movement.user_id == user.telegram_id, Movement.active.is_(True)).order_by(Movement.name))]
+    query = select(Movement, movement_usage(Movement.id)).where(
+        Movement.user_id == user.telegram_id, Movement.active.is_(True)).order_by(Movement.name, Movement.id)
+    return [movement_dict(item, used) for item, used in db.execute(query)]
 
 
 @app.post("/api/movements")
@@ -275,10 +283,10 @@ def delete_template(template_id: str, user: User = Depends(current_user), db: Se
 @app.post("/api/templates/{template_id}/exercises")
 def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     owned_template(db, user, template_id)
-    template = db.scalar(select(WorkoutTemplate).where(
+    template = locked_row(db, WorkoutTemplate,
         WorkoutTemplate.id == template_id, WorkoutTemplate.user_id == user.telegram_id,
         WorkoutTemplate.active.is_(True),
-    ).with_for_update().execution_options(populate_existing=True))
+    )
     if template is None:
         raise HTTPException(404, "Тренировочный день уже удалён")
     if not data.movement_id:
@@ -402,6 +410,7 @@ def replace_exercise(exercise_id: str, data: ReplacementIn, user: User = Depends
 
 @app.get("/api/sessions/today")
 def today_sessions(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    locked_row(db, User, User.telegram_id == user.telegram_id)
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
     if db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
                                            WeekOverride.week_start == monday(local_date),
@@ -417,7 +426,8 @@ def today_sessions(user: User = Depends(current_user), db: Session = Depends(get
     sessions = db.scalars(select(WorkoutSession).where(
         WorkoutSession.user_id == user.telegram_id,
         WorkoutSession.status != "completed",
-    ).order_by(WorkoutSession.scheduled_date)).all()
+    ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
+              selectinload(WorkoutSession.week)).order_by(WorkoutSession.scheduled_date, WorkoutSession.id)).all()
     return [session_dict(item, db.get(WorkoutTemplate, item.template_id)) for item in sessions]
 
 
@@ -427,7 +437,7 @@ def start_session(template_id: str, user: User = Depends(current_user), db: Sess
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
     session = get_or_create_session(db, template, local_date)
     if not session:
-        if resolve_week(db, user.telegram_id, local_date).phase_type == "vacation":
+        if vacation_override(db, user.telegram_id, local_date) or resolve_week(db, user.telegram_id, local_date).phase_type == "vacation":
             raise HTTPException(409, "На этой неделе отпуск — тренировки приостановлены")
         raise HTTPException(400, "Add exercises first")
     if session.status == "completed":
@@ -447,7 +457,9 @@ def history(user: User = Depends(current_user), db: Session = Depends(get_db)):
     items = db.scalars(select(WorkoutSession).where(
         WorkoutSession.user_id == user.telegram_id,
         WorkoutSession.status == "completed",
-    ).order_by(WorkoutSession.completed_at.desc()).limit(100)).all()
+    ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
+              selectinload(WorkoutSession.week))
+     .order_by(WorkoutSession.completed_at.desc().nulls_last(), WorkoutSession.id.desc()).limit(100)).all()
     return [session_dict(item, db.get(WorkoutTemplate, item.template_id)) for item in items]
 
 
@@ -507,7 +519,7 @@ def save_set(item_id: str, set_index: int, data: ResultIn, user: User = Depends(
         raise HTTPException(409, "У упражнения на время нет подходов")
     if session.status == "completed" or item.skipped:
         raise HTTPException(409, "Exercise cannot be edited")
-    if (data.is_working and (set_index < 1 or set_index > item.sets_count)) or (not data.is_working and (set_index > 0 or set_index < -5)):
+    if (data.is_working and (set_index < 1 or set_index > item.sets_count)) or (not data.is_working and (set_index >= 0 or set_index < -5)):
         raise HTTPException(400, "Invalid set number")
     result = db.scalars(select(SetResult).where(
         SetResult.session_exercise_id == item.id, SetResult.set_index == set_index
@@ -562,7 +574,7 @@ def remove_set(item_id: str, set_index: int, user: User = Depends(current_user),
 
 @app.post("/api/sessions/{session_id}/complete")
 def complete_session(session_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    session = owned_session(db, user, session_id)
+    session = owned_session(db, user, session_id, lock=True)
     if session.status == "completed":
         return session_detail(session_id, user, db)
     if not session.exercises or all(item.skipped for item in session.exercises):
@@ -570,14 +582,18 @@ def complete_session(session_id: str, user: User = Depends(current_user), db: Se
     if any(not item.skipped and (not item.actual_duration_minutes if item.kind != "strength"
                else len([r for r in item.results if r.is_working]) != item.sets_count) for item in session.exercises):
         raise HTTPException(400, "Record all sets or skip the exercise")
-    session.status = "completed"
-    session.completed_at = utcnow()
-    session.actual_date = datetime.now(ZoneInfo(user.timezone)).date()
+    actual_date = datetime.now(ZoneInfo(user.timezone)).date()
+    if vacation_override(db, user.telegram_id, actual_date):
+        raise HTTPException(409, "Во время отпуска завершить тренировку нельзя")
     if session.phase_type is not None:
-        actual_week = resolve_week(db, user.telegram_id, session.actual_date)
+        actual_week = resolve_week(db, user.telegram_id, actual_date)
         if actual_week.phase_type == "vacation":
             raise HTTPException(409, "Во время отпуска завершить тренировку нельзя")
-        session.week_id, session.phase_type = actual_week.id, actual_week.phase_type
+    # Phase/week identify the saved plan. Actual load is grouped by actual_date;
+    # completing an old plan must not retroactively turn it into a deload plan.
+    session.status = "completed"
+    session.completed_at = utcnow()
+    session.actual_date = actual_date
     template = db.get(WorkoutTemplate, session.template_id)
     db.commit()
     return session_dict(session, template)
@@ -585,7 +601,7 @@ def complete_session(session_id: str, user: User = Depends(current_user), db: Se
 
 @app.patch("/api/sessions/{session_id}/reschedule")
 def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    session = owned_session(db, user, session_id)
+    session = owned_session(db, user, session_id, lock=True)
     if session.status != "planned":
         raise HTTPException(409, "Only an unstarted session can be moved")
     try:
@@ -606,6 +622,8 @@ def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current
     if db.scalar(select(WorkoutSession).where(WorkoutSession.template_id == session.template_id,
                                               WorkoutSession.scheduled_date == new_date)):
         raise HTTPException(409, "Workout already exists on that date")
+    if vacation_override(db, user.telegram_id, new_date):
+        raise HTTPException(409, "На неделю отпуска нельзя перенести тренировку")
     week = resolve_week(db, user.telegram_id, new_date)
     if week.phase_type == "vacation":
         raise HTTPException(409, "На неделю отпуска нельзя перенести тренировку")
@@ -649,12 +667,13 @@ def next_week(user: User = Depends(current_user), db: Session = Depends(get_db))
 
 
 def editable_next_week(db: Session, user: User) -> tuple[date, TrainingWeek | None]:
+    locked_row(db, User, User.telegram_id == user.telegram_id)
     start = next_week_start(user)
     week = db.scalar(select(TrainingWeek).where(TrainingWeek.user_id == user.telegram_id,
                                                 TrainingWeek.week_start == start))
     if db.scalar(select(WorkoutSession).where(
         WorkoutSession.user_id == user.telegram_id,
-        WorkoutSession.scheduled_date >= start)):
+        or_(WorkoutSession.scheduled_date >= start, WorkoutSession.actual_date >= start))):
         raise HTTPException(409, "После начала выбранной недели уже создана тренировка")
     return start, week
 
@@ -692,6 +711,9 @@ def clear_next_week(user: User = Depends(current_user), db: Session = Depends(ge
 
 @app.post("/api/weeks/{week_start}/manual-deload")
 def manual_deload(week_start: date, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    locked_row(db, User, User.telegram_id == user.telegram_id)
+    if vacation_override(db, user.telegram_id, week_start):
+        raise HTTPException(409, "Выбран отпуск. Сначала отмените или замените его через меню следующей недели.")
     week = resolve_week(db, user.telegram_id, week_start)
     if week.week_start != week_start or db.scalar(select(WorkoutSession).where(
         WorkoutSession.user_id == user.telegram_id, WorkoutSession.week_id == week.id)):

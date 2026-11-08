@@ -60,7 +60,8 @@ class ExerciseIn(BaseModel):
         for phase in ("light", "medium", "heavy"):
             if getattr(self, f"{phase}_min") > getattr(self, f"{phase}_max"):
                 raise ValueError(f"{phase}: min cannot exceed max")
-        if self.rep_min is not None and self.rep_max is not None and self.rep_min > self.rep_max:
+        if (self.rep_min if self.rep_min is not None else self.medium_min) > (
+                self.rep_max if self.rep_max is not None else self.medium_max):
             raise ValueError("rep_min cannot exceed rep_max")
         return self
 

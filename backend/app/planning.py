@@ -7,8 +7,9 @@ from statistics import mean, median
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from .db import locked_row
 from .models import Exercise, Mesocycle, Movement, MuscleTarget, SessionExercise, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, utcnow
 from .muscles import split_details
 from .history import comparable_history, history_id, slot_id, snapshot_key
@@ -57,6 +58,13 @@ def monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
+def vacation_override(db: Session, user_id: int, on_date: date) -> bool:
+    return db.scalar(select(WeekOverride.id).where(
+        WeekOverride.user_id == user_id, WeekOverride.week_start == monday(on_date),
+        WeekOverride.kind == "vacation",
+    )) is not None
+
+
 def movement_for(db: Session, exercise: Exercise, user_id: int) -> Movement:
     if exercise.movement_id:
         found = db.get(Movement, exercise.movement_id)
@@ -74,15 +82,22 @@ def movement_for(db: Session, exercise: Exercise, user_id: int) -> Movement:
     return movement
 
 
-def completed_new(db: Session, user_id: int) -> list[WorkoutSession]:
-    return list(db.scalars(select(WorkoutSession).where(
+def completed_new(db: Session, user_id: int, start: date | None = None) -> list[WorkoutSession]:
+    query = select(WorkoutSession).where(
         WorkoutSession.user_id == user_id, WorkoutSession.status == "completed",
         WorkoutSession.phase_type.is_not(None),
-    ).order_by(WorkoutSession.completed_at, WorkoutSession.id)))
+    )
+    if start is not None:
+        query = query.where(WorkoutSession.actual_date >= start,
+                            WorkoutSession.actual_date < start + timedelta(days=7))
+    return list(db.scalars(query.options(
+        selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
+        selectinload(WorkoutSession.exercises).selectinload(SessionExercise.exercise),
+    ).order_by(WorkoutSession.completed_at.asc().nulls_first(), WorkoutSession.id)))
 
 
 def week_stats(db: Session, user_id: int, start: date) -> dict:
-    sessions = [s for s in completed_new(db, user_id) if s.actual_date and monday(s.actual_date) == start]
+    sessions = completed_new(db, user_id, start)
     hard, working = defaultdict(float), defaultdict(float)
     rir = []
     for session in sessions:
@@ -204,6 +219,7 @@ def project_week(db: Session, user_id: int, on_date: date) -> WeekPlan:
 
 def resolve_week(db: Session, user_id: int, on_date: date) -> TrainingWeek:
     """Persist a shared week decision only on the existing write paths."""
+    locked_row(db, User, User.telegram_id == user_id)
     plan = project_week(db, user_id, on_date)
     if plan.source == "saved":
         return db.get(TrainingWeek, plan.week.id)
@@ -229,7 +245,7 @@ def latest_accumulation(db: Session, exercise_id: str) -> list[SessionExercise]:
         WorkoutSession.status == "completed",
         WorkoutSession.phase_type == "accumulation",
         SessionExercise.skipped.is_(False),
-    ).order_by(WorkoutSession.completed_at.desc(), WorkoutSession.id.desc()).limit(3)))
+    ).order_by(WorkoutSession.completed_at.desc().nulls_last(), WorkoutSession.id.desc()).limit(3)))
 
 
 def prescription_details(db: Session, exercise: Exercise, week: TrainingWeek, reentry: bool) -> dict:
@@ -464,6 +480,11 @@ def next_set_suggestion(item: SessionExercise, step: float) -> dict | None:
 
 
 def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date) -> WorkoutSession | None:
+    # All write paths acquire the same user's lock first. Different days can
+    # otherwise race to insert their common training week/mesocycle.
+    locked_row(db, User, User.telegram_id == template.user_id)
+    if vacation_override(db, template.user_id, on_date):
+        return None
     template = db.scalar(select(WorkoutTemplate).where(
         WorkoutTemplate.id == template.id, WorkoutTemplate.active.is_(True),
     ).with_for_update().execution_options(populate_existing=True))

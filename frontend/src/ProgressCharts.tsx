@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Progress } from './types'
 import { weekRange, weekRangeLines, weekStart } from './weekDates'
 
-type WeekRow = Progress['weeks'][number]
+type WeekRow = Progress['weeks'][number] | NonNullable<Progress['weekly_summary']>[number]
 type Point = { date: string; value: number | null; phase?: string }
 const blue = '#7096d0'
 const grey = '#aeb4bd'
@@ -105,7 +105,7 @@ function LineChart({ title, points, unit, fromZero = false, note, assessment = '
       <DateAxis dates={points.map(point => point.date)} x={x} bottom={bottom} width={chartWidth} right={right} label={xAxisLabel} />
     </svg>
   </div>{assessment === 'quality' && <Legend items={[{ color: green, label: 'лучше: больше повторов' }, { color: blue, label: 'без заметного изменения' }, { color: coral, label: 'хуже: меньше повторов' }]} />}
-    {assessment === 'rir' && <Legend items={[{ color: coral, label: 'ПДО < 1: высокая усталость' }, { color: green, label: 'ПДО 1–3: цель' }, { color: amber, label: 'ПДО > 3: запас выше цели' }, { color: grey, label: 'Легкая неделя' }]} />}
+    {assessment === 'rir' && <Legend items={[{ color: coral, label: 'ПДО < 1: почти без запаса' }, { color: green, label: 'ПДО 1–3: 1–3 повтора в запасе' }, { color: amber, label: 'ПДО > 3: больше запаса' }, { color: grey, label: 'Легкая неделя' }]} />}
     <p className="hint chartNote">Последнее значение: {format(values.at(-1)!)} {unit}{unit.endsWith('.') ? '' : '.'} {note}</p></div>
 }
 
@@ -120,8 +120,8 @@ export function LineGraph({ rows, field, label, unit }: {
 
 export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles: boolean }) {
   const { ref, width } = useWidth()
-  if (!rows.length) return <div className="emptyCard">График появится после тренировки с указанным ПДО и мышцей упражнения.</div>
-  const max = stepFor(Math.max(...rows.map(row => Math.max(row.working_sets, allMuscles ? 0 : row.target_high)))) * 4
+  if (!rows.length) return <div className="emptyCard">{allMuscles ? 'График появится после завершённой тренировки с рабочими силовыми подходами.' : 'График появится после завершённой силовой тренировки с указанной мышцей упражнения.'}</div>
+  const max = stepFor(Math.max(...rows.map(row => Math.max(row.working_sets, allMuscles ? 0 : row.target_high ?? row.working_sets)))) * 4
   const left = 52, right = 10, top = 26, bottom = 190
   const chartWidth = Math.max(width, rows.length * 86 + left + right)
   const plotWidth = chartWidth - left - right, plotHeight = bottom - top
@@ -134,10 +134,10 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
       {rows.map((row, i) => {
         const center = left + (i + 0.5) * slot
         const deload = row.phase === 'deload' || row.phase === 'missed_deload'
-        const color = row.phase === 'missed_deload' ? coral : deload ? grey : allMuscles ? blue : row.working_sets < row.target_low ? amber : row.working_sets > row.target_high ? coral : green
+        const color = row.phase === 'missed_deload' ? coral : deload ? grey : allMuscles || row.target_low === null || row.target_high === null ? blue : row.working_sets < row.target_low ? amber : row.working_sets > row.target_high ? coral : green
         return <g key={row.week_start}>
           {deload && <rect x={left + i * slot + 2} y={top} width={slot - 4} height={plotHeight} className="plotDeload" />}
-          {!allMuscles && !deload && <rect x={center - barWidth / 2 - 3} y={y(row.target_high)} width={barWidth + 6} height={y(row.target_low) - y(row.target_high)} className="plotTarget" />}
+          {!allMuscles && !deload && row.target_low !== null && row.target_high !== null && <rect x={center - barWidth / 2 - 3} y={y(row.target_high)} width={barWidth + 6} height={y(row.target_low) - y(row.target_high)} className="plotTarget" />}
           <rect x={center - barWidth / 2} y={y(row.working_sets)} width={barWidth} height={bottom - y(row.working_sets)} rx="4" fill={color} opacity="0.3">
             <title>{`${weekRange(row.week_start)}${deload ? ' · Легкая неделя' : ''}: ${format(row.working_sets)} рабочих, из них ${format(row.hard_sets)} с ПДО ≤ 3`}</title>
           </rect>
@@ -149,7 +149,7 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
       })}
       <DateAxis dates={rows.map(row => row.week_start)} x={i => left + (i + 0.5) * slot} bottom={bottom} width={chartWidth} right={right} label="Неделя" />
     </svg>
-  </div><Legend items={allMuscles ? [{ color: blue, label: 'сумма по всем мышцам' }, { color: grey, label: 'Легкая неделя' }] : [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Легкая неделя' }]} />
+  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Легкая неделя' }] : [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Легкая неделя' }]} />
     <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — жёсткие рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : 'Цвет определяется по числу рабочих подходов относительно цели.'}</p></div>
 }
 

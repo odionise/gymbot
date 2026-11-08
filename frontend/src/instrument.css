@@ -28,7 +28,7 @@ h1, h2, h3, p { margin-top: 0; }
 h1, h2, h3 { letter-spacing: -.045em; }
 h1 { margin: 6px 0 25px; font-size: clamp(2.25rem, 8vw, 3rem); line-height: 1.03; font-weight: 570; }
 h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
-.appShell { max-width: 700px; min-height: 100dvh; margin: auto; padding-bottom: calc(83px + env(safe-area-inset-bottom)); background: var(--paper); }
+.appShell { max-width: 700px; min-height: 100dvh; margin: auto; padding-bottom: calc(max(83px, 3.5rem) + env(safe-area-inset-bottom)); background: var(--paper); }
 .page { padding: 29px 22px 38px; }
 .eyebrow, .cardIndex, .emptyOverline { color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .75rem; font-weight: 500; letter-spacing: .025em; }
 .intro { margin: -15px 0 24px; color: var(--muted); font-size: .9rem; }
@@ -242,3 +242,4 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
   .bottomNav { background: #f3f3ed; }
   .isWorkout { --muted: #d3e0cf; --line: #8ea591; }
 }
+.workoutFields, .formFields { min-width: 0; margin: 0; padding: 0; border: 0; }

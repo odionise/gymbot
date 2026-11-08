@@ -5,9 +5,9 @@ from statistics import mean, median
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from .models import TrainingWeek, User, WorkoutSession
+from .models import SessionExercise, TrainingWeek, User, WorkoutSession
 from .muscles import split_details, split_muscle_groups
 from .planning import PHASES, monday
 from .history import snapshot_key
@@ -18,10 +18,16 @@ def progress_for_user(db: Session, user_id: int) -> dict:
     local_today = datetime.now(ZoneInfo(user.timezone)).date()
     sessions = list(db.scalars(select(WorkoutSession).where(
         WorkoutSession.user_id == user_id, WorkoutSession.status == "completed"
-    ).order_by(WorkoutSession.completed_at)))
+    ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
+              selectinload(WorkoutSession.exercises).selectinload(SessionExercise.exercise))
+     .order_by(WorkoutSession.completed_at.asc().nulls_first(), WorkoutSession.id)))
     exercise_points = defaultdict(list)
     weekly = defaultdict(lambda: {"hard_sets": 0.0, "working_sets": 0.0,
                                    "tonnage": 0.0, "rirs": [], "reps": defaultdict(list)})
+    # Overall figures use each fact once, before distributing its muscle load.
+    # Missing muscle/RIR metadata does not erase a known weight/repetition fact.
+    totals = defaultdict(lambda: {"hard_sets": 0, "working_sets": 0,
+                                  "tonnage": 0.0, "rirs": [], "reps": defaultdict(list), "phases": set()})
     for session in sessions:
         day = session.actual_date or session.scheduled_date
         start = monday(day)
@@ -47,7 +53,18 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                 "reps": max(r.reps for r in results), "volume": round(volume, 2),
                 "estimated_strength": round(strength, 2) if strength is not None else None,
             })
-            if session.phase_type is None or exercise.primary_group == "Не назначено":
+            total = totals[start]
+            total["phases"].add(session.phase_type or "unknown")
+            for r in results:
+                total["working_sets"] += 1
+                total["tonnage"] += float(r.weight) * r.reps
+                if r.rir_reported is not None:
+                    total["rirs"].append(float(r.rir_reported))
+                    if float(r.rir_reported) <= 3:
+                        total["hard_sets"] += 1
+                        if session.phase_type == "accumulation":
+                            total["reps"][(key, float(r.weight), float(r.rir_reported))].append(r.reps)
+            if session.phase_type is None or not exercise.primary_group or exercise.primary_group == "Не назначено":
                 continue
             factors = [(exercise.primary_group, 1.0)] + [(g, 0.5) for g in split_details(exercise.secondary_groups)]
             for group, factor in factors:
@@ -107,6 +124,28 @@ def progress_for_user(db: Session, user_id: int) -> dict:
         if week and week.feeling_beat_up:
             signals.append(f"{group}: отмечено тяжело/болит; рост объёма приостановлен")
         rows.append(row)
+    total_comparable = defaultdict(set)
+    for start, bucket in totals.items():
+        if weeks.get(start) and weeks[start].phase_type == "accumulation":
+            for key in bucket["reps"]:
+                total_comparable[key].add(start)
+    summary = []
+    for start, bucket in sorted(totals.items()):
+        week = weeks.get(start)
+        phase = week.phase_type if week else next(iter(bucket["phases"])) if len(bucket["phases"]) == 1 else "mixed"
+        quality = [mean(values) for key, values in bucket["reps"].items()
+                   if phase == "accumulation" and len(total_comparable[key]) >= 2]
+        missed = bool(week and phase == "deload" and week.missed_deload)
+        summary.append({"week_start": start.isoformat(), "group": "Все мышцы",
+                        "phase": "missed_deload" if missed else phase,
+                        "deload_reason": week.deload_reason if week else None,
+                        "missed_deload": missed, "target_low": None, "target_high": None,
+                        "hard_sets": bucket["hard_sets"], "working_sets": bucket["working_sets"],
+                        "rir_known_sets": len(bucket["rirs"]),
+                        "rir_unknown_sets": bucket["working_sets"] - len(bucket["rirs"]),
+                        "tonnage": round(bucket["tonnage"], 1),
+                        "avg_rir": round(mean(bucket["rirs"]), 1) if bucket["rirs"] else None,
+                        "avg_reps_hard": round(mean(quality), 1) if quality else None})
     return {
         "exercises": [{"id": ":".join(value or "unknown" for value in key),
                        "slot_id": key[0], "history_id": key[1], "movement_id": key[2], "kind": key[3],
@@ -115,7 +154,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                        "group": points[-1]["group"],
                        "groups": list(dict.fromkeys(g for p in points for g in p["groups"])),
                        "points": points} for key, points in exercise_points.items()],
-        "weeks": rows, "signals": signals,
+        "weeks": rows, "weekly_summary": summary, "signals": signals,
         "groups": [{"group": group, "cycle_volume": round(sum(r["tonnage"] for r in rows if r["group"] == group and r["phase"] == "accumulation"), 1),
                     "strength_change_percent": None,
                     "sessions": sum(1 for s in sessions if group in split_muscle_groups(s.muscle_group))}

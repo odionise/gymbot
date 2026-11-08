@@ -30,7 +30,7 @@ def app_button(session_id: str | None = None) -> InlineKeyboardMarkup:
 
 @router.message(Command("start"))
 async def start(message: Message, bot: Bot):
-    if not message.from_user or not message.chat:
+    if not message.from_user or not message.chat or message.chat.type != "private":
         return
     with SessionLocal() as db:
         user = db.get(User, message.from_user.id)
@@ -48,35 +48,39 @@ async def start(message: Message, bot: Bot):
 
 @router.message(Command("today"))
 async def today(message: Message):
-    if not message.from_user:
+    if not message.from_user or not message.chat or message.chat.type != "private":
         return
     with SessionLocal() as db:
-        user = db.get(User, message.from_user.id)
-        if not user:
-            await message.answer("Сначала отправьте /start")
-            return
-        local_today = datetime.now(ZoneInfo(user.timezone)).date()
-        templates = list(db.scalars(select(WorkoutTemplate).where(
-            WorkoutTemplate.user_id == user.telegram_id,
-            WorkoutTemplate.active.is_(True),
-            WorkoutTemplate.weekday == local_today.weekday(),
-        )))
-        if not templates:
-            await message.answer("На сегодня тренировок нет.", reply_markup=app_button())
-            return
-        found = False
-        for template in templates:
-            session = get_or_create_session(db, template, local_today)
-            if session:
-                found = True
-                await message.answer(format_plan(session, local_today), reply_markup=app_button(session.id))
-        if templates and not found:
-            vacation = db.scalar(select(WeekOverride).where(
-                WeekOverride.user_id == user.telegram_id,
-                WeekOverride.week_start == monday(local_today),
-                WeekOverride.kind == "vacation"))
-            await message.answer("На этой неделе отпуск. Тренировки продолжатся после него." if vacation else
-                                 "В плане пока нет упражнений. Добавьте их в Mini App.", reply_markup=app_button())
+        replies = today_replies(db, message.from_user.id)
+    # Snapshot text/keyboards first, close the transaction, then await Telegram.
+    for text, keyboard in replies:
+        await message.answer(text, reply_markup=keyboard)
+
+
+def today_replies(db, user_id):
+    user = db.get(User, user_id)
+    if not user:
+        return [("Сначала отправьте /start", None)]
+    local_today = datetime.now(ZoneInfo(user.timezone)).date()
+    templates = list(db.scalars(select(WorkoutTemplate).where(
+        WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True),
+        WorkoutTemplate.weekday == local_today.weekday(),
+    )))
+    if not templates:
+        return [("На сегодня тренировок нет.", app_button())]
+    replies = []
+    for template in templates:
+        session = get_or_create_session(db, template, local_today)
+        if session:
+            replies.append((format_plan(session, local_today), app_button(session.id)))
+    if replies:
+        return replies
+    vacation = db.scalar(select(WeekOverride).where(
+        WeekOverride.user_id == user.telegram_id, WeekOverride.week_start == monday(local_today),
+        WeekOverride.kind == "vacation"))
+    text = ("На этой неделе отпуск. Тренировки продолжатся после него." if vacation else
+            "В плане пока нет упражнений. Добавьте их в Mini App.")
+    return [(text, app_button())]
 
 
 def format_plan(session, display_date) -> str:
@@ -106,7 +110,9 @@ async def send_due_reminders(bot: Bot, now: datetime | None = None) -> int:
         templates = list(db.scalars(select(WorkoutTemplate).where(WorkoutTemplate.active.is_(True))))
         for template in templates:
             user = db.get(User, template.user_id)
-            if not user or not user.chat_id:
+            # Retained group/foreign chat IDs must never receive a personal plan.
+            # /start in a private chat can repair the link without rewriting data.
+            if not user or user.chat_id != user.telegram_id:
                 continue
             local = moment.astimezone(ZoneInfo(user.timezone))
             if local.weekday() != template.weekday or local.strftime("%H:%M") < template.send_time:
@@ -118,15 +124,19 @@ async def send_due_reminders(bot: Bot, now: datetime | None = None) -> int:
                 continue
             session = get_or_create_session(db, template, local.date())
             if not session or session.status == "completed":
+                db.rollback()
                 continue
+            chat_id, template_id = user.chat_id, template.id
+            text, keyboard = format_plan(session, local.date()), app_button(session.id)
+            db.rollback()  # Never hold a user's write lock during a network call.
             try:
                 result = await bot.send_message(
-                    user.chat_id, format_plan(session, local.date()), reply_markup=app_button(session.id)
+                    chat_id, text, reply_markup=keyboard
                 )
             except Exception:
-                logger.exception("Could not send workout reminder for template %s", template.id)
+                logger.exception("Could not send workout reminder for template %s", template_id)
                 continue
-            db.add(Reminder(template_id=template.id, local_date=local.date(), message_id=result.message_id))
+            db.add(Reminder(template_id=template_id, local_date=local.date(), message_id=result.message_id))
             db.commit()
             sent += 1
     return sent

@@ -4,7 +4,7 @@
   background: #f5f6f7;
   --ink: #1c1d20;
   --forest: #222326;
-  --muted: #747980;
+  --muted: #626a73;
   --line: #e3e5e8;
   --paper: #f5f6f7;
   --white: #fff;
@@ -12,13 +12,13 @@
   --danger: #b45150;
 }
 html, body { background: var(--paper); }
-:focus-visible { outline-color: #779ad2; }
-h1, h2, h3 { letter-spacing: -.045em; }
+:focus-visible { outline-color: #5774a7; }
+h1, h2, h3 { letter-spacing: -.045em; overflow-wrap: anywhere; }
 h1 { margin: 4px 0 25px; font-size: clamp(2.05rem, 8vw, 2.7rem); line-height: 1.04; font-weight: 690; }
 h2 { font-weight: 650; }
 .appShell, .isWorkout { color: var(--ink); background: var(--paper); }
 .page { padding-top: 34px; }
-.eyebrow, .cardIndex, .emptyOverline { color: #757980; font-size: .76rem; font-weight: 550; letter-spacing: 0; }
+.eyebrow, .cardIndex, .emptyOverline { color: var(--muted); font-size: .76rem; font-weight: 550; letter-spacing: 0; }
 .intro { color: var(--muted); }
 .heroSession, .emptyCard, .completedSession, .editorPanel, .programCard, .settingsBlock, .summaryCard, .chartCard {
   border: 1px solid #e8e9ec;
@@ -70,7 +70,7 @@ h2 { font-weight: 650; }
 }
 .outlineButton { border-color: #cfd1d5; color: var(--ink); }
 .bottomNav { border-color: #e5e6e9; background: #fffffff2; }
-.bottomNav button { color: #888c93; }
+.bottomNav button { color: var(--muted); overflow-wrap: anywhere; }
 .bottomNav button.active { border-radius: 14px; background: #222326; color: white; font-weight: 600; }
 .bottomNav button.active::after { display: none; }
 .errorToast { background: #f9ebe9; color: #9d4646; }
@@ -106,7 +106,7 @@ h2 { font-weight: 650; }
 .programPicker button.chosen, .metricTabs button.active, .phaseTabs button.active { border-color: #222326; background: #222326; color: white; }
 .field input, .field select { border-color: #e1e3e6; border-radius: 11px; background: #f7f8f9; color: var(--ink); color-scheme: light; }
 .field input::placeholder { color: #9a9ea5; }
-.field input:focus, .field select:focus, .setRow input:focus, .overrideBox input:focus { outline-color: #83a2db; }
+.field input:focus, .field select:focus, .setRow input:focus, .overrideBox input:focus { outline-color: #5774a7; }
 .editorDivider, .programExercise { border-color: #e7e9ec; }
 .programCardTop, .programCard p, .field > span, .fieldHelp, .programExercise small, .summaryCard > span, .summaryCard small, .chartNote, .chartLabels { color: var(--muted); }
 .programActions button, .programExercise button { color: #303238; }
@@ -161,7 +161,7 @@ h2 { font-weight: 650; }
 .progressFilter { position: relative; min-width: 0; }
 .filterLabel { display: block; margin: 0 0 7px; color: #6f747b; font-size: .75rem; font-weight: 590; }
 .filterTrigger { width: 100%; min-height: 48px; padding: 0 13px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #e0e2e6; border-radius: 13px; background: white; color: #222326; text-align: left; font-size: .9rem; font-weight: 600; box-shadow: 0 3px 12px rgba(24,31,43,.025); }
-.filterTrigger.open, .filterTrigger:focus-visible { border-color: #9ea3ab; outline: 2px solid #dce5f2; outline-offset: 1px; }
+.filterTrigger.open, .filterTrigger:focus-visible { border-color: #9ea3ab; outline: 2px solid #5774a7; outline-offset: 1px; }
 .filterTrigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .filterTrigger svg { flex: none; transition: transform 150ms ease; }
 .filterTrigger.open svg { transform: rotate(180deg); }
@@ -234,7 +234,7 @@ h2 { font-weight: 650; }
 .chartDot { fill: #83a2db; stroke: white; }
 .historyCard { border-color: #e7e9ec; }
 .historyChevron { color: #373a40; }
-.isWorkout { --ink: #1c1d20; --muted: #747980; --line: #e3e5e8; --paper: #f5f6f7; --forest: #222326; color: var(--ink); background: var(--paper); }
+.isWorkout { --ink: #1c1d20; --muted: #626a73; --line: #e3e5e8; --paper: #f5f6f7; --forest: #222326; color: var(--ink); background: var(--paper); }
 .isWorkout .eyebrow, .isWorkout .backButton { color: var(--ink); }
 .isWorkout .meterTrack { background: #e9eaed; }
 .isWorkout .meterTrack div { background: #83a2db; }
@@ -249,7 +249,7 @@ h2 { font-weight: 650; }
 .homeGuideItem h3 { margin: 0; font-size: inherit; letter-spacing: 0; }
 .homeGuideItem h3 button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 57px; padding: 12px 9px; border: 0; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .homeGuideItem h3 button:hover { color: #315d7d; }
-.homeGuideItem h3 button:focus-visible { outline: 2px solid #779ad2; outline-offset: -2px; border-radius: 9px; }
+.homeGuideItem h3 button:focus-visible { outline: 2px solid #5774a7; outline-offset: -2px; border-radius: 9px; }
 .homeGuideIndex { flex: 0 0 24px; align-self: flex-start; padding-top: 4px; color: #a0a7ae; font-size: .69rem; font-weight: 650; font-variant-numeric: tabular-nums; }
 .homeGuideQuestion { flex: 1; font-size: .87rem; line-height: 1.4; font-weight: 650; }
 .homeGuideToggle { display: grid; flex: 0 0 31px; width: 31px; height: 31px; place-items: center; border-radius: 50%; background: #f1f3f5; color: #3c4854; }
@@ -261,9 +261,9 @@ h2 { font-weight: 650; }
 .homeGuideAnswer[hidden] { display: none; }
 .homeGuideAnswer p { margin: 0; color: #555f6a; font-size: .85rem; line-height: 1.58; }
 .homeGuideAnswer p + p { margin-top: 11px; }
-.todayHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.todayHeading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .todayHeading h1 { margin: 0; }
-.nextWeekControl { position: relative; }
+.nextWeekControl { position: relative; min-width: 0; max-width: 100%; margin-left: auto; }
 .nextWeekTrigger { border: 1px solid #d9dce1; border-radius: 18px; background: #fff; padding: 9px 12px; font-size: .75rem; font-weight: 700; color: var(--ink); cursor: pointer; }
 .nextWeekTrigger span { margin-left: 4px; }
 .nextWeekMenu { position: absolute; z-index: 12; right: 0; top: calc(100% + 8px); width: min(320px, 88vw); padding: 14px; border: 1px solid #e0e2e6; border-radius: 18px; background: #fff; box-shadow: 0 12px 34px #2223; }
@@ -283,7 +283,7 @@ h2 { font-weight: 650; }
 .setStepButton:first-child { border-right: 1px solid #e1e3e6; }
 .setStepButton:last-child { border-left: 1px solid #e1e3e6; }
 .setStepButton:disabled { color: #abb0b6; cursor: default; }
-.setStepButton:focus-visible { position: relative; z-index: 1; outline: 2px solid #83a2db; outline-offset: -2px; }
+.setStepButton:focus-visible { position: relative; z-index: 1; outline: 2px solid #5774a7; outline-offset: -2px; }
 .warmupActions { margin: 2px 0 8px; gap: 18px; }
 .warmupActions button:disabled { opacity: .42; cursor: default; }
 @media (max-width: 540px) {

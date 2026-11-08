@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .history import history_id, slot_id
 from .models import Movement, User, WorkoutSession, WorkoutTemplate, utcnow
 from .muscles import ALL_DETAILED_GROUPS
-from .planning import is_reentry, monday, planned_counts, project_week, recommendation_context
+from .planning import is_reentry, monday, planned_counts, project_week, recommendation_context, vacation_override
 
 
 def configured_movements(db: Session, user_id: int, selected: WorkoutTemplate) -> tuple[dict, list]:
@@ -78,7 +78,11 @@ def preview_session(db: Session, user_id: int, template_id: str, on_date: date) 
                        "phase_type": week.phase_type, "deload_reason": week.deload_reason,
                        "is_postponed": week.is_postponed, "missed_deload": week.missed_deload, "source": plan.source},
               "exercises": [], "existing_session": None, "blocking_reasons": []}
-    if week.phase_type == "vacation":
+    if week.phase_type == "vacation" or vacation_override(db, user_id, on_date):
+        if week.phase_type != "vacation":
+            # An old inconsistent saved phase cannot bypass an explicit holiday.
+            # This is a projection only; preserve the recorded week/snapshots.
+            result["week"].update(phase_type="vacation", deload_reason=None, is_postponed=False, source="calculated")
         result["blocking_reasons"] = [{"code": "vacation", "message": "На выбранной неделе отпуск: новый план не создаётся."}]
         return result
     existing = db.scalar(select(WorkoutSession).where(

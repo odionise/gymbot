@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 
 from fastapi import Depends
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import get_settings
@@ -25,6 +25,21 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 def get_db():
     with SessionLocal() as db:
         yield db
+
+
+def locked_row(db, model, *conditions):
+    """Refresh under a database lock, always including the caller's owner filter.
+
+    SQLite ignores FOR UPDATE. A no-op primary-key update acquires its writer
+    lock before reading mutable state, without changing any recorded value.
+    PostgreSQL uses a row lock; both locks last until commit/rollback.
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        key = model.__mapper__.primary_key[0]
+        db.execute(update(model).where(*conditions).values({key.key: key})
+                   .execution_options(synchronize_session=False))
+    return db.scalar(select(model).where(*conditions).with_for_update()
+                     .execution_options(populate_existing=True))
 
 
 @contextmanager

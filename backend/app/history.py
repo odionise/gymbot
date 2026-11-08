@@ -9,6 +9,13 @@ from sqlalchemy.orm import Session
 from .models import Exercise, Movement, SessionExercise, WorkoutSession, WorkoutTemplate
 
 
+def completion_timestamp(value) -> float:
+    if value is None:
+        return float("-inf")
+    # SQLite stores naive UTC; preserve the offset of aware PostgreSQL values.
+    return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value).timestamp()
+
+
 def slot_id(exercise: Exercise) -> str:
     return exercise.slot_id or exercise.id
 
@@ -21,11 +28,16 @@ def snapshot_key(item: SessionExercise) -> tuple[str, str, str | None, str]:
     return slot_id(item.exercise), history_id(item.exercise), item.movement_id, item.kind
 
 
-def movement_is_used(db: Session, movement_id: str) -> bool:
-    return bool(db.scalar(select(or_(
+def movement_usage(movement_id):
+    """Reusable EXISTS expression; catalog listing evaluates it in one query."""
+    return or_(
         exists().where(Exercise.movement_id == movement_id),
         exists().where(SessionExercise.movement_id == movement_id),
-    ))))
+    )
+
+
+def movement_is_used(db: Session, movement_id: str) -> bool:
+    return bool(db.scalar(select(movement_usage(movement_id))))
 
 
 def comparable_history(db: Session, exercise: Exercise):
@@ -76,8 +88,7 @@ def history_options(db: Session, exercise: Exercise, movement: Movement) -> dict
         if not completed:
             continue
         completed.sort(key=lambda row: (
-            row.session.completed_at.replace(tzinfo=timezone.utc).timestamp()
-            if row.session.completed_at else float("-inf"), row.session.id,
+            completion_timestamp(row.session.completed_at), row.session.id,
         ))
         last = completed[-1]
         working = [result for result in last.results if result.is_working]
