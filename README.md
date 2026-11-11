@@ -17,6 +17,16 @@
 
 ## Развёртывание
 
+### Vercel Hobby (свежая база)
+
+Корневой `vercel.json` развёртывает Vite и FastAPI как два Vercel Services в одном проекте. Для данных нужен отдельный PostgreSQL из Vercel Marketplace, например Neon на бесплатном плане. Создайте **новую пустую** базу и передайте её строку подключения как `DATABASE_URL`. При первом обращении API применит миграции до схемы 8. Справочники видов упражнений и мышечных групп заданы кодом; упражнения, программы, тренировки и демонстрационные данные не импортируются.
+
+В переменных Production задайте `APP_ENV=production`, `BOT_TOKEN`, `DATABASE_URL`, `PUBLIC_URL=https://<домен-проекта>.vercel.app`, случайные `WEBHOOK_SECRET` и `CRON_SECRET`, `DEV_TELEGRAM_ID=0`, `REMINDERS_ENABLED=true`. Секреты храните только в настройках Vercel, не в Git. На Vercel API не регистрирует webhook и не запускает фоновый цикл при старте функции. После успешной проверки `/health` зарегистрируйте Telegram webhook на `PUBLIC_URL/telegram/webhook` с заголовком-секретом `WEBHOOK_SECRET`; затем задайте `PUBLIC_URL` в BotFather как адрес Mini App.
+
+Напоминания вызываются Vercel Schedule через защищённый `POST /api/internal/reminders` каждые 15 минут. На Hobby запуск может дополнительно задерживаться до 15 минут, поэтому доставка в точное время не гарантируется. Сборка не требует Docker на Vercel; локальный Docker Compose остаётся для самостоятельного запуска и проверок.
+
+### Docker Compose на VPS
+
 1. Скопируйте `.env.example` в `.env`. Укажите `BOT_TOKEN`, `DOMAIN`, `PUBLIC_URL=https://<домен>`, `POSTGRES_PASSWORD` и случайный `WEBHOOK_SECRET`. В `DATABASE_URL` укажите тот же пароль. Для публичного сервера поставьте `APP_ENV=production`, удалите или обнулите `DEV_TELEGRAM_ID`.
 2. Выполните `docker compose up -d --build`. Caddy автоматически получит HTTPS-сертификат. API создаст таблицы и зарегистрирует webhook.
 3. В BotFather настройте Main Mini App или кнопку меню на `PUBLIC_URL`. Отправьте боту `/start`, затем откройте приложение и создайте программу.

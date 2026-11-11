@@ -1,4 +1,6 @@
 import asyncio
+import os
+import secrets
 from contextlib import asynccontextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -13,7 +15,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .analytics import progress_for_user
 from .auth import authenticated_user_id, current_user
-from .bot import dispatcher, reminder_loop
+from .bot import dispatcher, reminder_loop, send_due_reminders
 from .config import get_settings
 from .db import Base, engine, get_db, get_preview_db, locked_row
 from .migrations import migrate
@@ -30,6 +32,7 @@ from .serializers import exercise_dict, movement_dict, session_dict, template_di
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    on_vercel = os.environ.get("VERCEL") == "1"
     if settings.app_env == "production" and (
         not settings.bot_token
         or settings.bot_token == "replace-with-botfather-token"
@@ -41,8 +44,8 @@ async def lifespan(app: FastAPI):
     migrate(engine)
     bot = Bot(settings.bot_token) if settings.bot_token and settings.bot_token != "replace-with-botfather-token" else None
     app.state.bot = bot
-    task = asyncio.create_task(reminder_loop(bot)) if bot and settings.reminders_enabled else None
-    if bot and settings.app_env == "production":
+    task = asyncio.create_task(reminder_loop(bot)) if bot and settings.reminders_enabled and not on_vercel else None
+    if bot and settings.app_env == "production" and not on_vercel:
         await bot.set_webhook(
             f"{settings.public_url.rstrip('/')}/telegram/webhook",
             secret_token=settings.webhook_secret,
@@ -174,6 +177,19 @@ def admin_users(q: str, actor: User = Depends(current_user), db: Session = Depen
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/api/internal/reminders")
+async def scheduled_reminders(authorization: str | None = Header(default=None)):
+    secret = os.environ.get("CRON_SECRET")
+    if not secret or not secrets.compare_digest(authorization or "", f"Bearer {secret}"):
+        raise HTTPException(403, "Forbidden")
+    if not get_settings().reminders_enabled:
+        return {"sent": 0}
+    bot = app.state.bot
+    if bot is None:
+        raise HTTPException(503, "Bot unavailable")
+    return {"sent": await send_due_reminders(bot)}
 
 
 @app.post("/telegram/webhook")

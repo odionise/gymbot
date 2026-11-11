@@ -12,6 +12,12 @@ class Base(DeclarativeBase):
 
 
 def make_engine(url: str):
+    # Vercel Marketplace databases use a plain postgres:// URL. Keep psycopg
+    # as the sole PostgreSQL driver, matching the pinned runtime dependencies.
+    if url.startswith("postgres://"):
+        url = "postgresql+psycopg://" + url[len("postgres://"):]
+    elif url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://"):]
     kwargs = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
