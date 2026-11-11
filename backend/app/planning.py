@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .db import locked_row
 from .models import Exercise, Mesocycle, Movement, MuscleTarget, SessionExercise, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, utcnow
-from .muscles import split_details
+from .muscles import split_details, volume_group
 from .history import comparable_history, history_id, slot_id, snapshot_key
 from .recommendations import save_recommendation
 
@@ -104,7 +104,9 @@ def week_stats(db: Session, user_id: int, start: date) -> dict:
         for exercise in session.exercises:
             if exercise.kind != "strength" or exercise.skipped or not exercise.primary_group or exercise.primary_group == "Не назначено":
                 continue
-            groups = [(exercise.primary_group, 1.0)] + [(g, 0.5) for g in split_details(exercise.secondary_groups)]
+            weights = {volume_group(g): 0.5 for g in split_details(exercise.secondary_groups)}
+            weights[volume_group(exercise.primary_group)] = 1.0
+            groups = list(weights.items())
             for result in exercise.results:
                 if not result.is_working:
                     continue
@@ -345,11 +347,11 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
             item.update(reason_code=code, reason=reason)
     movements = {e.id: lookup(e) for e in exercises}
     def volume(group: str) -> float:
-        return sum(counts[e.id] * (1 if movements[e.id].primary_group == group else
-                   0.5 if group in split_details(movements[e.id].secondary_groups) else 0)
+        return sum(counts[e.id] * (1 if volume_group(movements[e.id].primary_group) == group else
+                   0.5 if group in {volume_group(g) for g in split_details(movements[e.id].secondary_groups)} else 0)
                    for e in exercises)
-    groups = ({m.primary_group for m in movements.values() if m.primary_group != "Не назначено"}
-              | {group for m in movements.values() for group in split_details(m.secondary_groups)})
+    groups = ({volume_group(m.primary_group) for m in movements.values() if m.primary_group != "Не назначено"}
+              | {volume_group(group) for m in movements.values() for group in split_details(m.secondary_groups)})
     targets = json.loads(week.targets_json or "{}")
     default_cap = db.get(User, user_id).volume_cap
     def enforce_limits(deload: bool = False) -> dict[str, int]:
@@ -357,8 +359,8 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
         before_volumes = {group: volume(group) for group in groups}
         for group in sorted(groups):
             limit = 8 if deload else targets.get(group, [12, 18, default_cap])[2]
-            candidates = sorted((e for e in exercises if movements[e.id].primary_group == group
-                                 or group in split_details(movements[e.id].secondary_groups)),
+            candidates = sorted((e for e in exercises if volume_group(movements[e.id].primary_group) == group
+                                 or group in {volume_group(g) for g in split_details(movements[e.id].secondary_groups)}),
                                  key=lambda e: (movements[e.id].is_anchor, -counts[e.id], slot_id(e)))
             while volume(group) > limit and any(counts[e.id] > 1 for e in candidates):
                 candidate = next(e for e in candidates if counts[e.id] > 1)
@@ -366,7 +368,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
         if details is not None:
             for e in exercises:
                 movement = movements[e.id]
-                own_groups = {movement.primary_group, *split_details(movement.secondary_groups)} & groups
+                own_groups = {volume_group(g) for g in (movement.primary_group, *split_details(movement.secondary_groups))} & groups
                 item = {**trace[e.id], "value": counts[e.id], "before_limits": before_counts[e.id],
                         "limited": counts[e.id] != before_counts[e.id],
                         "limits": [{"group": group, "cap": 8 if deload else targets.get(group, [12, 18, default_cap])[2],
@@ -425,7 +427,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
     for e in exercises:
         movement = movements[e.id]
         if movement.primary_group != "Не назначено":
-            by_group[movement.primary_group].append((e, movement))
+            by_group[volume_group(movement.primary_group)].append((e, movement))
     for group, options in by_group.items():
         cap = targets.get(group, [12, 18, default_cap])[2]
         options.sort(key=lambda pair: (not pair[1].is_anchor, pair[0].position, slot_id(pair[0])))

@@ -25,14 +25,29 @@ export function HistoryEntry({ session, expanded, onToggle }: { session: Workout
 export function HistoryView() {
   const [items, setItems] = useState<WorkoutSession[] | null>(null)
   const [open, setOpen] = useState<string | null>(null)
+  const [month, setMonth] = useState(() => { const now = new Date(); return new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1)) })
+  const [selectedDay, setSelectedDay] = useState<string | null>(null)
   const [error, setError] = useState('')
-  useEffect(() => { api.history().then(setItems).catch(err => setError((err as Error).message)) }, [])
+  useEffect(() => { api.history().then(result => { setItems(result); const latest = result.find(session => session.actual_date)?.actual_date; if (latest) setMonth(new Date(`${latest.slice(0, 7)}-01T12:00:00Z`)) }).catch(err => setError((err as Error).message)) }, [])
+  const year = month.getUTCFullYear()
+  const monthIndex = month.getUTCMonth()
+  const firstWeekday = (month.getUTCDay() + 6) % 7
+  const weeks = Math.ceil((firstWeekday + new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate()) / 7)
+  const days = Array.from({ length: weeks * 7 }, (_, index) => {
+    const date = new Date(Date.UTC(year, monthIndex, index - firstWeekday + 1))
+    return { key: date.toISOString().slice(0, 10), day: date.getUTCDate(), current: date.getUTCMonth() === monthIndex }
+  })
+  const visibleItems = items?.filter(session => session.actual_date?.slice(0, 7) === `${year}-${String(monthIndex + 1).padStart(2, '0')}`) ?? []
+  const dayItems = selectedDay ? visibleItems.filter(session => session.actual_date === selectedDay) : visibleItems
+  const monthTitle = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(month)
+  const shiftMonth = (step: number) => { setMonth(new Date(Date.UTC(year, monthIndex + step, 1))); setSelectedDay(null); setOpen(null) }
   return <>
-    <div className="eyebrow">Ваш журнал</div><h1>История</h1>
-    <p className="intro">Завершённые тренировки и подходы.</p>
+    <div className="historyMonthHead"><div><span className="historyOverline">История тренировок</span><h1>{monthTitle}</h1></div><div className="historyMonthActions"><button type="button" onClick={() => shiftMonth(-1)} aria-label="Предыдущий месяц">←</button><button type="button" onClick={() => shiftMonth(1)} aria-label="Следующий месяц">→</button></div></div>
+    <div className="historyWeekdays" aria-hidden="true">{['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => <span key={day}>{day}</span>)}</div>
+    <div className="historyCalendar" aria-label={`Календарь тренировок: ${monthTitle}`}>{Array.from({ length: weeks }, (_, weekIndex) => <div className="historyWeek" key={weekIndex}>{days.slice(weekIndex * 7, weekIndex * 7 + 7).map(day => { const count = items?.filter(session => session.actual_date === day.key).length ?? 0; const today = day.key === new Date().toLocaleDateString('en-CA'); return <button type="button" key={day.key} className={`${day.current ? '' : 'outside'} ${selectedDay === day.key ? 'selected' : ''} ${today ? 'today' : ''}`} onClick={() => { setSelectedDay(selectedDay === day.key ? null : day.key); setOpen(null) }} aria-label={`${dateLabel(day.key)}: ${count} тренировок`} aria-pressed={selectedDay === day.key}><span>{day.day}</span>{count > 0 && <i aria-hidden="true" />}</button> })}</div>)}</div>
     {error && <div className="emptyCard">{error}</div>}
     {!items && !error && <div className="emptyCard">Загружаем историю…</div>}
     {items?.length === 0 && <div className="emptyCard"><div className="emptyIcon">▤</div><h2>История пока пуста</h2><p>После первой завершённой тренировки здесь появятся результаты.</p></div>}
-    <div className="historyList">{items?.map(session => <HistoryEntry key={session.id} session={session} expanded={open === session.id} onToggle={() => setOpen(open === session.id ? null : session.id)} />)}</div>
+    {items && items.length > 0 && <section className="historyResults"><div className="sectionHead"><h2>{selectedDay ? dateLabel(selectedDay) : 'Тренировки месяца'}</h2><span>{dayItems.length}</span></div>{dayItems.length ? <div className="historyList">{dayItems.map(session => <HistoryEntry key={session.id} session={session} expanded={open === session.id} onToggle={() => setOpen(open === session.id ? null : session.id)} />)}</div> : <p className="historyNoResults">За этот период тренировок нет. Выберите другой день или месяц.</p>}</section>}
   </>
 }

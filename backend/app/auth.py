@@ -71,4 +71,10 @@ def current_user(
             user = db.get(User, user_id)
             if user is None:
                 raise
+    if authorization and authorization.startswith("tma "):
+        signed = dict(parse_qsl(authorization[4:], keep_blank_values=True))
+        telegram_username = json.loads(signed["user"]).get("username")
+        if user.telegram_username != telegram_username:
+            user.telegram_username = telegram_username
+            db.commit()
     return user

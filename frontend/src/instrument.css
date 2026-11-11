@@ -1,5 +1,5 @@
 :root {
-  font-family: 'Roboto Variable', Roboto, sans-serif;
+  font-family: 'Golos Text', Arial, sans-serif;
   font-size: 16px;
   line-height: 1.42;
   font-synthesis: none;
@@ -30,7 +30,7 @@ h1 { margin: 6px 0 25px; font-size: clamp(2.25rem, 8vw, 3rem); line-height: 1.03
 h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .appShell { max-width: 700px; min-height: 100dvh; margin: auto; padding-bottom: calc(max(83px, 3.5rem) + env(safe-area-inset-bottom)); background: var(--paper); }
 .page { padding: 29px 22px 38px; }
-.eyebrow, .cardIndex, .emptyOverline { color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .75rem; font-weight: 500; letter-spacing: .025em; }
+.eyebrow, .cardIndex, .emptyOverline { color: var(--muted); font-family: 'Golos Text', Arial, sans-serif; font-size: .75rem; font-weight: 500; letter-spacing: .025em; }
 .intro { margin: -15px 0 24px; color: var(--muted); font-size: .9rem; }
 .sessionList { display: grid; gap: 12px; }
 .heroSession { overflow: hidden; padding: 21px 21px 20px; border-radius: 11px; background: var(--forest); color: #f4f7ee; }
@@ -44,16 +44,16 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .heroExercises { margin-bottom: 21px; border-top: 1px solid #405746; }
 .heroExercise { min-height: 58px; padding: 12px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #405746; }
 .heroExercise span { min-width: 0; font-size: .9rem; line-height: 1.25; }
-.heroExercise strong { flex: none; color: #eaf2e4; font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .81rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.heroExercise strong { flex: none; color: #eaf2e4; font-family: 'Golos Text', Arial, sans-serif; font-size: .81rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .heroMore { display: block; padding: 11px 0 0; color: #aab8a8; font-size: .77rem; }
 .heroFooter { width: 100%; min-height: 50px; padding: 0 19px; display: flex; align-items: center; justify-content: space-between; border: 0; border-radius: 999px; background: var(--lime); color: #1a2b1d; text-align: left; font-size: .91rem; font-weight: 630; }
 .heroFooter span:last-child { font-size: 1.24rem; font-weight: 400; }
 .sectionHead { margin: 36px 0 5px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .sectionHead h2 { margin: 0; font-size: 1.2rem; font-weight: 590; }
-.sectionHead > span { color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .75rem; }
+.sectionHead > span { color: var(--muted); font-family: 'Golos Text', Arial, sans-serif; font-size: .75rem; }
 .templateList { border-top: 1px solid var(--line); }
 .templateMini { min-height: 83px; padding: 13px 0; display: flex; align-items: center; gap: 13px; border-bottom: 1px solid var(--line); }
-.templateOrder, .programNumber { width: 15px; flex: none; align-self: center; color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .75rem; }
+.templateOrder, .programNumber { width: 15px; flex: none; align-self: center; color: var(--muted); font-family: 'Golos Text', Arial, sans-serif; font-size: .75rem; }
 .templateDetails { flex: 1; min-width: 0; }
 .templateDetails strong, .templateDetails small { display: block; }
 .templateDetails strong { font-size: 1rem; font-weight: 560; line-height: 1.2; }
@@ -92,7 +92,7 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .completionMeter { margin: 28px 0 0; padding: 17px 0 21px; border-top: 1px solid var(--line); }
 .meterTop { margin-bottom: 12px; display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .meterTop > span { color: var(--muted); font-size: .82rem; }
-.meterTop strong { font-family: 'Roboto Variable', Roboto, sans-serif; font-size: 1rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.meterTop strong { font-family: 'Golos Text', Arial, sans-serif; font-size: 1rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .meterTop em { color: var(--muted); font-style: normal; }
 .meterTrack { height: 4px; overflow: hidden; border-radius: 3px; background: var(--line); }
 .meterTrack div { height: 100%; background: var(--forest); transition: width 180ms cubic-bezier(.23,1,.32,1); }
@@ -100,24 +100,24 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .exerciseCard.skipped { opacity: .53; }
 .exerciseHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .exerciseHead h2 { margin: 5px 0 0; font-size: 1.37rem; font-weight: 560; overflow-wrap: anywhere; }
-.exerciseCheck { flex: none; font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .87rem; font-weight: 500; white-space: nowrap; }
+.exerciseCheck { flex: none; font-family: 'Golos Text', Arial, sans-serif; font-size: .87rem; font-weight: 500; white-space: nowrap; }
 .exerciseCheck span { color: var(--muted); }
 .targetLine { margin: 19px 0 7px; padding: 15px 0 17px; display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .targetLine > div { min-width: 0; display: flex; flex-direction: column; }
 .targetLine > div + div { padding-left: 17px; border-left: 1px solid var(--line); }
 .targetLine span { color: var(--muted); font-size: .76rem; }
-.targetLine strong { margin-top: 5px; font-family: 'Roboto Variable', Roboto, sans-serif; font-size: clamp(1.5rem, 7vw, 2rem); line-height: 1.1; font-weight: 500; letter-spacing: -.055em; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.targetLine strong small { font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .81rem; letter-spacing: 0; }
+.targetLine strong { margin-top: 5px; font-family: 'Golos Text', Arial, sans-serif; font-size: clamp(1.5rem, 7vw, 2rem); line-height: 1.1; font-weight: 500; letter-spacing: -.055em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.targetLine strong small { font-family: 'Golos Text', Arial, sans-serif; font-size: .81rem; letter-spacing: 0; }
 .targetReps > small { margin-top: 5px; color: var(--muted); font-size: .7rem; }
 .textButton, .skipButton { min-height: 37px; padding: 4px 0; border: 0; background: transparent; color: var(--ink); font-size: .78rem; text-decoration: underline; text-underline-offset: 3px; }
 .skipButton { margin-top: 8px; color: var(--muted); }
 .setsList { margin-top: 13px; }
 .setsCaption { margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: .74rem; }
 .setRow { min-height: 62px; padding: 6px 0; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); }
-.setNumber { width: 18px; flex: none; color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .75rem; }
+.setNumber { width: 18px; flex: none; color: var(--muted); font-family: 'Golos Text', Arial, sans-serif; font-size: .75rem; }
 .setRow label { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; }
 .setRow label span { color: var(--muted); font-size: .72rem; }
-.setRow input { width: 100%; min-width: 0; height: 42px; padding: 0 4px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); text-align: center; font-family: 'Roboto Variable', Roboto, sans-serif; font-size: 1rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.setRow input { width: 100%; min-width: 0; height: 42px; padding: 0 4px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); text-align: center; font-family: 'Golos Text', Arial, sans-serif; font-size: 1rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .setRow input::-webkit-inner-spin-button, .setRow input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .setRow input[type=number] { appearance: textfield; -moz-appearance: textfield; }
 .multiply { color: var(--muted); }
@@ -131,8 +131,8 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .finishButton { margin-top: 25px; }
 .programPicker { margin: 20px -22px 18px; padding: 0 22px 5px; display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; }
 .programPicker::-webkit-scrollbar { display: none; }
-.programPicker button { min-height: 39px; padding: 8px 15px; flex: none; border: 1px solid #aebbb0; border-radius: 999px; background: transparent; color: var(--ink); font-size: .79rem; }
-.programPicker button.chosen { border-color: var(--forest); background: var(--forest); color: #fff; }
+.programPicker > button { min-height: 39px; padding: 8px 15px; flex: none; border: 1px solid #aebbb0; border-radius: 999px; background: transparent; color: var(--ink); font-size: .79rem; }
+.programPicker > button.chosen { border-color: var(--forest); background: var(--forest); color: #fff; }
 .editorPanel, .programCard, .settingsBlock { margin: 15px 0; padding: 19px; border: 1px solid var(--line); border-radius: 9px; background: #fafbf8; }
 .editorTitle, .programCardTop, .programActions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .editorTitle h2, .editorTitle h3 { margin: 0 0 20px; font-size: 1.19rem; }
@@ -163,9 +163,9 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .summaryGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 10px; }
 .summaryCard { min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 9px; background: #fafbf8; }
 .summaryCard > span { color: var(--muted); font-size: .76rem; }
-.summaryCard strong { margin: 5px 0; font-family: 'Roboto Variable', Roboto, sans-serif; font-size: 1.7rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.summaryCard strong { margin: 5px 0; font-family: 'Golos Text', Arial, sans-serif; font-size: 1.7rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .summaryCard small { color: var(--muted); font-size: .73rem; line-height: 1.4; }
-.summaryCard b { font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .83rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.summaryCard b { font-family: 'Golos Text', Arial, sans-serif; font-size: .83rem; font-weight: 500; font-variant-numeric: tabular-nums; }
 .summaryDivider { height: 1px; margin: 5px 0; background: var(--line); }
 .selectExercise { margin: 17px 0; }
 .chartCard { padding: 16px; border: 1px solid var(--line); border-radius: 9px; background: #fafbf8; }
@@ -174,14 +174,14 @@ h2 { font-size: 1.25rem; line-height: 1.17; font-weight: 570; }
 .metricTabs button, .phaseTabs button { min-height: 36px; padding: 6px 11px; flex: none; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted); font-size: .76rem; }
 .metricTabs button.active, .phaseTabs button.active { border-color: var(--forest); background: var(--forest); color: #fff; }
 .phaseTabs { margin-top: 8px; }
-.chartValue { margin: 23px 0 8px; font-family: 'Roboto Variable', Roboto, sans-serif; font-size: 2.4rem; font-weight: 500; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
-.chartValue span { color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .83rem; letter-spacing: 0; }
+.chartValue { margin: 23px 0 8px; font-family: 'Golos Text', Arial, sans-serif; font-size: 2.4rem; font-weight: 500; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.chartValue span { color: var(--muted); font-family: 'Golos Text', Arial, sans-serif; font-size: .83rem; letter-spacing: 0; }
 .graphWrap { height: 205px; border-bottom: 1px solid var(--line); }
 .graphWrap svg { width: 100%; height: 175px; overflow: visible; }
 .gridLine { stroke: #d9e0d7; stroke-width: .6; vector-effect: non-scaling-stroke; stroke-dasharray: 2 3; }
 .chartLine { fill: none; stroke: #39664b; stroke-width: 2.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
 .chartDot { fill: #39664b; stroke: #fafbf8; stroke-width: 1.4; vector-effect: non-scaling-stroke; }
-.chartLabels { display: flex; justify-content: space-between; color: var(--muted); font-family: 'Roboto Variable', Roboto, sans-serif; font-size: .66rem; }
+.chartLabels { display: flex; justify-content: space-between; color: var(--muted); font-family: 'Golos Text', Arial, sans-serif; font-size: .66rem; }
 .chartNote { margin-top: 13px; color: var(--muted); font-size: .75rem; line-height: 1.5; }
 .graphEmpty { height: 180px; display: grid; place-content: center; color: var(--muted); font-size: .8rem; }
 .historyList { border-top: 1px solid var(--line); }

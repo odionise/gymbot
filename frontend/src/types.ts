@@ -169,16 +169,22 @@ export interface ProgressPoint {
 export interface Progress {
   exercises: { id: string; history_id: string; slot_id: string; movement_id: string | null; kind: Movement['kind']; name: string; label?: string; group: string; groups: string[]; points: ProgressPoint[] }[]
   groups: { group: string; cycle_volume: number; strength_change_percent: number | null; sessions: number }[]
-  weeks: { week_start: string; group: string; phase: string; deload_reason: string | null; hard_sets: number; working_sets: number; tonnage: number; avg_rir: number | null; avg_reps_hard: number | null; target_low: number; target_high: number; missed_deload: boolean }[]
+  weeks: { week_start: string; group: string; phase: string; deload_reason: string | null; hard_sets: number; working_sets: number; tonnage: number; avg_rir: number | null; avg_reps_hard: number | null; target_low: number | null; target_high: number | null; missed_deload: boolean }[]
   weekly_summary?: (Omit<Progress['weeks'][number], 'target_low' | 'target_high'> & { target_low: null; target_high: null; rir_known_sets: number; rir_unknown_sets: number })[]
   signals: string[]
 }
 
 export interface Me {
   telegram_id: number
+  is_admin: boolean
   timezone: string
   volume_cap: number
   has_started_bot: boolean
+  sex: 'male' | 'female' | null
+  display_name: string | null
+  birth_date: string | null
+  age: number | null
+  profile_complete: boolean
 }
 
 export interface NextWeek { week_start: string; kind: 'deload' | 'vacation' | null }

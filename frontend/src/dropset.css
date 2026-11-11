@@ -1,0 +1,361 @@
+/* Dark, type-led interface based on the supplied Dropset references. */
+:root, .isWorkout {
+  color-scheme: dark;
+  --paper: #08090b;
+  --ink: #f7f7f8;
+  --muted: #a2a2aa;
+  --line: #303036;
+  --forest: #f7f7f8;
+  --white: #151518;
+  --danger: #f18079;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: 'Golos Text', Arial, sans-serif;
+}
+html, body, #root, .appShell, .isWorkout { background: var(--paper); color: var(--ink); }
+::selection { background: #ddd; color: #08090b; }
+:focus-visible { outline: 2px solid #f7f7f8; outline-offset: 3px; }
+h1, h2, h3 { color: var(--ink); letter-spacing: -.055em; }
+h1 { font-size: clamp(2.75rem, 10vw, 4rem); font-weight: 800; line-height: .98; }
+h2 { font-weight: 760; }
+.page { padding-top: 31px; }
+.eyebrow, .cardIndex, .emptyOverline, .heroKicker { color: var(--muted); letter-spacing: .035em; }
+.todayHeading { align-items: end; margin: 5px 0 29px; }
+.todayHeading h1 { font-size: clamp(3rem, 13vw, 4.75rem); }
+.sectionHead { margin-top: 43px; margin-bottom: 13px; }
+.sectionHead h2 { font-size: 1.35rem; font-weight: 760; }
+.heroSession, .emptyCard, .completedSession, .editorPanel, .programCard, .settingsBlock, .summaryCard, .chartCard, .programSessionBlock, .homeGuide, .profileCard, .exerciseCard, .isWorkout .exerciseCard {
+  border: 1px solid var(--line);
+  border-radius: 23px;
+  background: #151518;
+  color: var(--ink);
+  box-shadow: none;
+}
+.heroSession { padding: 24px; background: #17171a; }
+.heroIntroduction { min-height: 172px; }
+.heroTitle { margin-top: 18px; font-size: clamp(2rem, 8vw, 2.75rem); font-weight: 790; }
+.heroMeta, .heroMore, .completedSession p { color: var(--muted); }
+.muscleDiagramLegend, .muscleDialog p, .muscleDialogHelp { color: var(--muted) !important; }
+.muscleDialogBackdrop { background: #000b; }
+.muscleDialog { background: #18181b; color: var(--ink); border: 1px solid #3a3a40; box-shadow: 0 25px 70px #0009; }
+.muscleDialogHead button { color: var(--ink); }
+.phasePill, .programCard .phasePill, .phasePill.phase-light, .programCard .phasePill.phase-light, .phasePill.phase-heavy, .programCard .phasePill.phase-heavy { background: #2b2b30; border: 1px solid #4a4a50; color: #f7f7f8; }
+.phaseRail { gap: 6px; }
+.phaseRail span, .phaseRail span:nth-child(1), .phaseRail span:nth-child(2), .phaseRail span:nth-child(3) { height: 4px; background: #f7f7f8; opacity: .18; }
+.phaseRail span.current { opacity: .9; }
+.heroExercises, .heroExercise, .templateMini, .programExercise, .programExerciseItem, .catalogItem, .historyCard, .historyExercise, .homeGuideItem, .editorDivider, .programSessionBlock > .sectionHead { border-color: var(--line); }
+.heroExercise span, .heroExercise strong, .templateDetails strong { color: var(--ink); }
+.heroFooter, .primaryButton, .isWorkout .finishButton { width: max-content; max-width: 100%; min-height: 51px; padding: 0 23px; display: inline-flex; justify-content: center; gap: 12px; border: 0; border-radius: 999px; background: #f7f7f8; color: #08090b; font-weight: 760; }
+.heroFooter span:last-child { display: none; }
+.heroFooter { margin-top: 6px; }
+.outlineButton, .nextWeekTrigger, .roundButton { border: 1px solid #55555b; border-radius: 999px; background: #2b2b30; color: var(--ink); }
+.templateList, .historyList { border-color: var(--line); background: #151518; }
+.roundButton { background: transparent; }
+.bottomNav { border-color: #303036; background: #101013f5; }
+.bottomNav button { color: #9c9ca5; }
+.bottomNav button.active { border-radius: 0; background: transparent; color: #fff; font-weight: 760; }
+.bottomNav button.active::after { display: block; bottom: 0; width: 20px; height: 2px; background: white; }
+.errorToast { background: #4d2224; color: #ffe5e5; }
+.loadingMark { background: #fff; }
+.emptyCard p, .completedTop, .programCard p, .field > span, .fieldHelp, .programExercise small, .summaryCard > span, .summaryCard small, .chartNote, .chartLabels, .hint, .templateDetails small, .programCardTop { color: var(--muted); }
+.emptyIcon, .completedSymbol { border-color: #52525a; color: #fff; background: #303036; }
+.completedSession { background: #191c1e; border-color: #354345; }
+.completedSession button { border-color: var(--line); color: #fff; }
+.backButton, .isWorkout .backButton { color: #fff; }
+.workoutTitle h1 { font-size: clamp(2.4rem, 10vw, 3.6rem); font-weight: 800; }
+.completionMeter, .setRow, .isWorkout .setRow, .targetLine > div + div, .isWorkout .targetLine > div + div, .overrideBox, .isWorkout .overrideBox { border-color: var(--line); }
+.meterTrack, .isWorkout .meterTrack { background: #35353a; }
+.meterTrack div, .isWorkout .meterTrack div { background: #fff; }
+.exerciseCard, .isWorkout .exerciseCard { padding: 21px; margin: 14px 0; }
+.exerciseHead h2 { font-weight: 750; }
+.targetLine, .isWorkout .targetLine { background: #26262a; border: 0; }
+.targetLine strong, .isWorkout .targetLine strong { color: #fff; font-weight: 750; }
+.textButton, .skipButton, .isWorkout .textButton { color: #e3e3e7; }
+.setRow input, .isWorkout .setRow input, .overrideBox input, .isWorkout .overrideBox input, .field input, .field select, .filterTrigger, .editorPanel .filterTrigger, .movementPickerTrigger, .nextWeekMenu button, .timeTriggerText {
+  border-color: #45454c; background: #242428; color: #fff; color-scheme: dark;
+}
+.field input::placeholder, .setRow input::placeholder { color: #8e8e97; }
+.setValueControl { border-color: #45454c; background: #242428; }
+.setStepButton { background: #303035; color: #fff; }
+.setStepButton:first-child, .setStepButton:last-child { border-color: #45454c; }
+.saveSet, .isWorkout .saveSet, .overrideBox button, .isWorkout .overrideBox button, .timeDone { background: #fff; color: #08090b; }
+.saveSet.saved, .isWorkout .saveSet.saved { background: #33383b; color: #c4e7d5; }
+.programPicker > button, .metricTabs button, .phaseTabs button { background: #2b2b30; border-color: #2b2b30; color: #fff; }
+.programPicker > button.chosen, .metricTabs button.active, .phaseTabs button.active { border-color: #fff; background: transparent; color: #fff; }
+.programActions button, .programExercise button, .catalogItemRow button { color: #fff; }
+.programSessionBlock { padding: 21px; }
+.programInlineEditor > .editorPanel, .catalogEditor { background: #1d1d21; border-color: #44444a; }
+.programExerciseItem .programExercise button[aria-expanded="true"], .catalogItemRow button[aria-expanded="true"] { background: #35353b; color: #fff; }
+.catalogList, .movementChoiceList, .movementChoiceList button, .movementPickerTrigger { border-color: var(--line); }
+.movementChoiceList, .movementChoiceList button { background: #1b1b1f; color: #fff; }
+.movementChoiceList button.selected { background: #35353b; color: #fff; }
+.movementPickerTrigger > svg, .movementPickerTrigger small, .movementChoiceList button small, .catalogItemRow small { color: var(--muted); }
+.filterLabel, .filterTrigger, .filterMenu button, .timeChoices button, .timeColumn > span { color: var(--ink); }
+.filterMenu, .timeMenu, .nextWeekMenu { background: #202024; border-color: #4a4a50; box-shadow: 0 20px 50px #0008; }
+.filterMenu button, .timeChoices button { background: transparent; }
+.filterMenu button[aria-selected="true"], .timeChoices button[aria-selected="true"], .nextWeekMenu button.selected { background: #3b3b41; color: #fff; }
+.timeChoices, .allGroupsSelected, .groupChips button { border-color: #4a4a50; }
+.groupChips button { background: #303036; color: #fff; }
+.nextWeekMenu p, .nextWeekMenu button small { color: var(--muted); }
+.nextWeekMenu button.clearWeek { color: #f3a4a0; }
+.checkboxField input[type="checkbox"] { accent-color: #fff; }
+.summaryDivider { background: var(--line); }
+.chartCard, .summaryCard { background: #19191d; }
+.chartValue, .summaryCard strong, .summaryCard b { color: #fff; }
+.chartLegend span, .plotLegend span { color: #b8b8c0; }
+.plotGrid, .gridLine { stroke: #34343a; }
+.plotAxis { stroke: #797982; }
+.plotUnit, .plotTick { fill: #b4b4bd; }
+.plotDeload { fill: #29292e; }
+.plotTarget { fill: #333b48; }
+.plotPoint { fill: #19191d; }
+.plotValue { fill: #fff; stroke: #19191d; }
+.plotBarValue { fill: #d6d6df; }
+.chartDot { stroke: #19191d; }
+.strengthTableWrap, .strengthTable th, .strengthTable td { border-color: #38383f; }
+.strengthTable thead th, .strengthTable thead th:first-child { background: #29292e; color: #dddde3; }
+.strengthTable th:first-child { background: #19191d; color: #fff; box-shadow: 1px 0 #38383f; }
+.strengthCell--up { color: #a4e2c4; background: #1b3c30; }
+.strengthCell--same { color: #b1caf5; background: #27354c; }
+.strengthCell--down { color: #f3afab; background: #45272a; }
+.strengthCell--light { color: #c6c6cb; background: #333339; }
+.strengthCell--first, .strengthCell--empty { color: #aaaab2; }
+.homeGuide { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.homeGuideHeader { padding: 26px 0 15px; }
+.homeGuideList { padding: 0; }
+.homeGuideItem h3 button { color: var(--ink); }
+.homeGuideItem h3 button:hover, .homeGuideItem.isOpen .homeGuideQuestion { color: #fff; }
+.homeGuideToggle, .homeGuideItem.isOpen .homeGuideToggle { background: #2b2b30; color: #fff; }
+.homeGuideAnswer p { color: #b4b4bd; }
+.nextWeekTrigger { background: #2b2b30; border-color: #55555b; }
+.profileShortcut { color: var(--muted); }
+.profileCard { min-height: min(710px, calc(100dvh - 65px)); margin: 0 auto; padding: 10px 5px 30px; border: 0; border-radius: 0; background: #08090b; }
+.profileProgress { display: flex; align-items: center; gap: 25px; }
+.profileBack { width: 44px; height: 44px; border: 0; background: transparent; color: #fff; font-size: 2rem; }
+.profileProgressTrack { flex: 1; height: 5px; overflow: hidden; border-radius: 9px; background: #2b2b30; }
+.profileProgressTrack span { display: block; height: 100%; border-radius: inherit; background: #fff; transition: width .2s; }
+.profileQuestion { margin-top: clamp(70px, 17dvh, 150px); }
+.profileQuestion h2 { max-width: 600px; margin: 14px 0 20px; font-size: clamp(2.7rem, 11vw, 4.6rem); font-weight: 800; line-height: 1.02; }
+.profileQuestion p { max-width: 440px; color: #b2b2bb; font-size: 1rem; line-height: 1.5; }
+.profileAnswer { margin-top: clamp(65px, 11dvh, 115px); }
+.profileSexChoices { display: flex; flex-wrap: wrap; gap: 12px; justify-content: flex-end; }
+.profileSexChoices label { flex: 0 1 auto; min-height: 55px; padding: 12px 22px; border: 1px solid transparent; border-radius: 999px; background: #2b2b30; color: #fff; font-size: 1rem; font-weight: 650; }
+.profileSexChoices label.chosen { border-color: #fff; background: transparent; }
+.profileSexChoices input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.profileSexChoices label:focus-within { outline: 2px solid #fff; outline-offset: 3px; }
+.profileAnswer .field input { min-height: 62px; font-size: 1.3rem; }
+.profileContinue { margin-top: 45px !important; }
+.profileError { color: #ffada8 !important; }
+@media (max-width: 390px) {
+  .page { padding-inline: 17px; }
+  .heroIntroduction { grid-template-columns: minmax(0,1fr) 118px; }
+  .heroSession { padding: 19px; }
+  .heroFooter { width: 100%; }
+  .exerciseCard, .isWorkout .exerciseCard { padding: 16px; }
+  .profileQuestion { margin-top: 72px; }
+}
+@media (hover: hover) and (pointer: fine) {
+  .heroFooter:hover, .primaryButton:hover, .isWorkout .finishButton:hover { background: #d7d7dd; color: #08090b; }
+  .outlineButton:hover, .roundButton:hover, .filterMenu button:hover, .timeChoices button:hover:not([aria-selected="true"]) { background: #3c3c42; color: #fff; }
+  .bottomNav button:hover { color: #fff; }
+}
+@media (prefers-reduced-transparency: reduce) { .bottomNav { background: #101013; } }
+@media (prefers-contrast: more) { :root { --muted: #c9c9d0; --line: #77777e; } }
+
+/* Dropset's rhythm: dark planes, generous radii and very few visible borders. */
+:root {
+  --paper: #080809;
+  --surface: #202024;
+  --surface-raised: #29292e;
+  --muted: #ababaf;
+  --line: #343438;
+}
+body, button, input, select { font-family: 'Golos Text', Arial, sans-serif; }
+h1, h2, h3, .heroTitle, .workoutTitle h1, .profileQuestion h2 {
+  font-family: 'Golos Text', Arial, sans-serif;
+  font-weight: 700;
+  letter-spacing: -.055em;
+}
+.page { padding-top: 44px; }
+.eyebrow, .cardIndex, .emptyOverline, .heroKicker { color: #a7a7ad; font-weight: 500; letter-spacing: 0; }
+.todayHeading h1 { font-size: clamp(3.3rem, 14vw, 5.25rem); }
+.heroSession, .emptyCard, .completedSession, .editorPanel, .programCard, .settingsBlock, .summaryCard, .chartCard, .programSessionBlock, .exerciseCard, .isWorkout .exerciseCard {
+  border: 0;
+  border-radius: 32px;
+  background: var(--surface);
+}
+.heroSession { padding: 28px; }
+.heroTitle { font-size: clamp(2.25rem, 8.8vw, 3rem); line-height: 1; }
+.heroTop { align-items: flex-start; }
+.heroKicker { font-size: .82rem; }
+.heroIntroduction { min-height: 195px; }
+.phasePill, .programCard .phasePill, .phasePill.phase-light, .programCard .phasePill.phase-light, .phasePill.phase-heavy, .programCard .phasePill.phase-heavy {
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 999px;
+  background: #39393f;
+  color: #f5f5f6;
+}
+.phaseRail { margin: 18px 0 22px; }
+.phaseRail span, .phaseRail span:nth-child(1), .phaseRail span:nth-child(2), .phaseRail span:nth-child(3) { background: #fff; opacity: .14; }
+.phaseRail span.current { opacity: 1; }
+.heroExercise { min-height: 62px; }
+.heroExercise span { font-size: .95rem; }
+.heroExercise strong { font-size: .88rem; }
+.heroFooter, .primaryButton, .isWorkout .finishButton {
+  min-height: 56px;
+  padding-inline: 25px;
+  background: #f7f7f8;
+  color: #09090a;
+  font-size: .94rem;
+  font-weight: 700;
+}
+.heroFooter { width: max-content; }
+.outlineButton, .nextWeekTrigger, .roundButton, .programPicker > button, .metricTabs button, .phaseTabs button, .groupChips button {
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  background: #303035;
+  color: #fff;
+}
+.programPicker > button.chosen, .metricTabs button.active, .phaseTabs button.active { border-color: #fff; background: transparent; }
+.nextWeekTrigger { padding: 10px 15px; font-size: .8rem; }
+.roundButton { border: 1.5px solid #515159; background: transparent; }
+.templateList, .historyList { padding: 0 19px; border: 0; border-radius: 30px; background: var(--surface); }
+.templateMini { min-height: 94px; }
+.templateDetails strong { font-size: 1rem; }
+.bottomNav { border-top: 0; background: #19191cf5; }
+.bottomNav button.active::after { display: none; }
+.bottomNav button.active { color: #fff; }
+.bottomNav button svg { transition: transform .28s cubic-bezier(.2,.8,.2,1); }
+.bottomNav button.active svg { transform: translateY(-2px) scale(1.1); }
+.programSessionBlock { padding: 26px; }
+.programSessionBlock .programCard { background: transparent; }
+.programSessionBlock > .sectionHead { border-color: #414147; }
+.programInlineEditor > .editorPanel, .catalogEditor { border: 0; border-radius: 25px; background: #29292e; }
+.movementChoiceList, .movementPickerTrigger, .filterTrigger, .timeMenu, .filterMenu, .nextWeekMenu { border: 0; border-radius: 23px; }
+.movementChoiceList, .movementChoiceList button { background: #29292e; }
+.movementChoiceList button.selected, .filterMenu button[aria-selected="true"] { background: #3b3b42; }
+.movementPickerTrigger, .filterTrigger, .field input, .field select, .setRow input, .isWorkout .setRow input, .overrideBox input, .isWorkout .overrideBox input {
+  border: 1.5px solid transparent;
+  border-radius: 18px;
+  background: #303035;
+}
+.field input:focus, .field select:focus, .setRow input:focus, .overrideBox input:focus, .filterTrigger:focus-visible { border-color: #fff; outline: 0; }
+.targetLine, .isWorkout .targetLine { border-radius: 22px; background: #303035; }
+.setValueControl { border: 0; border-radius: 17px; background: #303035; }
+.setStepButton { background: #37373d; }
+.setStepButton:first-child, .setStepButton:last-child { border-color: #47474e; }
+.saveSet, .isWorkout .saveSet { width: auto; min-width: 86px; padding-inline: 12px; border-radius: 16px; font-size: .8rem; font-weight: 700; }
+.summaryCard, .chartCard { padding: 22px; border: 0; border-radius: 29px; background: var(--surface); }
+.chartCard h3 { font-size: 1.22rem; letter-spacing: -.045em; }
+.homeGuide { border: 0; }
+.homeGuideItem { border-color: #37373d; }
+.homeGuideToggle, .homeGuideItem.isOpen .homeGuideToggle { border-radius: 50%; background: #303035; }
+.muscleDialog { border: 0; border-radius: 32px; background: #222226; }
+.profileCard { background: #080809; }
+.profileQuestion { margin-top: clamp(110px, 23dvh, 225px); }
+.profileQuestion h2 { font-size: clamp(3.15rem, 12vw, 5.5rem); line-height: .99; }
+.profileQuestion p { font-size: 1.08rem; }
+.profileAnswer { margin-top: clamp(88px, 13dvh, 145px); }
+.profileSexChoices label { min-height: 60px; padding: 14px 25px; border-radius: 999px; background: #2b2b30; }
+.profileSexChoices label.chosen { border-color: #fff; }
+@media (max-width: 390px) {
+  .page { padding-top: 35px; }
+  .heroSession { padding: 23px; }
+  .heroIntroduction { min-height: 180px; }
+  .heroFooter { width: 100%; }
+  .programSessionBlock, .chartCard { padding: 20px; }
+  .profileQuestion { margin-top: 100px; }
+}
+@media (max-width: 350px) {
+  .heroIntroduction { grid-template-columns: 1fr; gap: 14px; }
+  .muscleDiagram { width: 172px; justify-self: center; }
+  .muscleFigures svg { max-height: 145px; }
+  .muscleDiagramLegend { font-size: .61rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .page > :not(.bottomNav), .heroSession, .exerciseCard, .chartCard { animation: dropset-appear .38s cubic-bezier(.2,.75,.2,1) both; }
+  .sessionList .heroSession:nth-child(2), .summaryGrid .summaryCard:nth-child(2) { animation-delay: .07s; }
+  .sessionList .heroSession:nth-child(3), .summaryGrid .summaryCard:nth-child(3) { animation-delay: .13s; }
+  .heroFooter, .primaryButton, .outlineButton, .roundButton, .programPicker > button, .metricTabs button, .phaseTabs button, .profileSexChoices label, .filterTrigger, .nextWeekTrigger {
+    transition: background-color .2s ease, border-color .2s ease, color .2s ease, transform .24s cubic-bezier(.2,.8,.2,1);
+  }
+  .profileQuestion h2, .profileAnswer { animation: dropset-appear .35s cubic-bezier(.2,.75,.2,1) both; }
+  @keyframes dropset-appear { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+}
+
+/* Interior screens from the later workout, trends and library references. */
+.bottomNav { min-height: calc(68px + env(safe-area-inset-bottom)); padding: 8px 15px calc(9px + env(safe-area-inset-bottom)); background: #0c0c0ef5; }
+.bottomNav button { font-size: 0; gap: 0; }
+.bottomNav svg { width: 26px; height: 26px; stroke-width: 1.8; }
+.bottomNav button.active svg { transform: none; }
+.bottomNav button.active { color: #fff; }
+.page > .eyebrow { display: none; }
+.page > .todayDate { display: block; margin-bottom: 5px; }
+.page > h1 { margin: 26px 0 18px; font-size: clamp(2.65rem, 11vw, 3.65rem); }
+.intro { margin: -2px 0 30px; font-size: 1rem; line-height: 1.5; }
+.programPicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 23px 0 28px;
+  padding: 0;
+  overflow: visible;
+}
+.programPicker > button, .programPicker > button.chosen {
+  position: relative;
+  min-width: 0;
+  min-height: 154px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 7px;
+  border: 1.5px solid #424249;
+  border-radius: 28px;
+  background: #1e1e22;
+  color: #fff;
+  text-align: left;
+}
+.programPicker > button.chosen { border-color: #f7f7f8; background: #28282d; }
+.programTileName { max-width: 100%; font-size: 1.12rem; line-height: 1.1; font-weight: 700; overflow-wrap: anywhere; }
+.programTileMeta { max-width: 100%; color: #b2b2b9; font-size: .75rem; line-height: 1.25; }
+.programPicker .addProgram { justify-content: center; align-items: center; gap: 3px; }
+.programPicker .addProgram > span:first-child { font-size: 4.5rem; line-height: 1; font-weight: 300; }
+.programPicker .addProgram .programTileMeta { font-size: .75rem; }
+.programSessionBlock { margin-top: 0; background: #1e1e22; }
+.programCard h2 { font-size: 1.8rem; line-height: 1.05; }
+.programActions button { min-height: 42px; }
+.programExerciseItem { padding: 8px 0; }
+.catalogList { margin-top: 20px; border-top: 0; }
+.catalogItem { border-color: #303036; }
+.catalogItemRow { min-height: 92px; gap: 16px; }
+.catalogItemRow::before { content: ''; width: 52px; height: 52px; flex: none; border: 1px solid #4a4a50; border-radius: 17px; background: #29292e; }
+.catalogItemRow strong { font-size: 1rem; font-weight: 680; }
+.catalogItemRow small { font-size: .8rem; }
+.catalogItemRow button { border-radius: 50%; color: #b6b6bd; }
+.progressFilters { gap: 12px; margin: 24px 0 30px; }
+.progressFilter .filterLabel { margin-bottom: 9px; color: #adadb5; font-size: .8rem; }
+.progressFilters .filterTrigger { min-height: 51px; padding-inline: 15px; border-radius: 999px; background: #2d2d32; }
+.chartCard { min-height: 380px; padding: 25px 20px 28px; border-radius: 32px; background: #242428; }
+.chartCard h3 { margin-bottom: 24px; font-size: 1.25rem; }
+.chartCard .plotWrap { margin-top: 24px; }
+.plotGrid { stroke: #515158; }
+.plotAxis { stroke: #77777e; }
+.plotLine { stroke-width: 2.6; }
+.plotPoint { stroke-width: 2.2; }
+.plotTick, .plotUnit { fill: #c4c4cb; }
+.isWorkout .exerciseCard, .exerciseCard { margin: 30px 0; padding: 26px 0 12px; border: 0; border-top: 1px solid #38383e; border-radius: 0; background: transparent; }
+.exerciseHead h2 { font-size: 1.6rem; }
+.workoutTitle h1 { font-size: clamp(2.75rem, 11vw, 4rem); }
+.targetLine, .isWorkout .targetLine { margin-top: 26px; padding: 20px; border-radius: 24px; background: #242428; }
+.targetLine strong, .isWorkout .targetLine strong { font-size: clamp(1.8rem, 8vw, 2.45rem); }
+.setRow { min-height: 70px; }
+.setStepButton, .setRow .setValueControl input { min-height: 51px; }
+@media (max-width: 390px) {
+  .programPicker { gap: 10px; }
+  .programPicker > button, .programPicker > button.chosen { min-height: 136px; padding: 16px; border-radius: 25px; }
+  .programTileName { font-size: 1rem; }
+  .chartCard { padding: 21px 17px 24px; }
+}

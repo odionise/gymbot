@@ -44,8 +44,8 @@ function Axis({ width, top, bottom, left, right, min, max, unit }: {
   </>
 }
 
-function DateAxis({ dates, x, bottom, width, right, label }: {
-  dates: string[]; x: (index: number) => number; bottom: number; width: number; right: number; label: string
+function DateAxis({ dates, x, bottom, width, right, label, labelY = 258 }: {
+  dates: string[]; x: (index: number) => number; bottom: number; width: number; right: number; label: string; labelY?: number
 }) {
   return <>
     {dates.map((day, i) => {
@@ -54,7 +54,7 @@ function DateAxis({ dates, x, bottom, width, right, label }: {
         <tspan x={x(i)}>{range}</tspan><tspan x={x(i)} dy="13">{month}</tspan>
       </text>
     })}
-    <text x={width - right} y={258} textAnchor="end" className="plotUnit">{label}</text>
+    <text x={width - right} y={labelY} textAnchor="end" className="plotUnit">{label}</text>
   </>
 }
 
@@ -72,7 +72,7 @@ function LineChart({ title, points, unit, fromZero = false, note, assessment = '
   const min = fromZero ? 0 : Math.max(0, Math.floor(Math.min(...values)) - 1)
   const span = Math.max(...values) - min
   const max = min + (unit === 'повт.' ? Math.max(1, Math.ceil(span / 4)) : stepFor(span)) * 4
-  const left = 56, right = 40, top = 26, bottom = 190
+  const left = 56, right = 40, top = 26, bottom = 320
   const chartWidth = Math.max(width, 500, points.length * 86 + left + right)
   const plotWidth = chartWidth - left - right
   const x = (i: number) => left + (points.length === 1 ? plotWidth / 2 : i / (points.length - 1) * plotWidth)
@@ -90,7 +90,7 @@ function LineChart({ title, points, unit, fromZero = false, note, assessment = '
     return blue
   }
   return <div className="chartCard"><h3>{title}</h3><div className="plotWrap" ref={ref}>
-    <svg width={chartWidth} height="265" viewBox={`0 0 ${chartWidth} 265`} role="img" aria-label={`${title}, ${unit}`}>
+    <svg width={chartWidth} height="395" viewBox={`0 0 ${chartWidth} 395`} role="img" aria-label={`${title}, ${unit}`}>
       {points.map((point, i) => point.phase === 'deload' || point.phase === 'missed_deload'
         ? <rect key={`band-${i}`} x={x(i) - bandWidth / 2} y={top} width={bandWidth} height={bottom - top} className="plotDeload" /> : null)}
       <Axis width={chartWidth} top={top} bottom={bottom} left={left} right={right} min={min} max={max} unit={unit} />
@@ -102,7 +102,7 @@ function LineChart({ title, points, unit, fromZero = false, note, assessment = '
         </circle>
         <text x={x(point.index)} y={y(point.value!) < top + 22 ? y(point.value!) + 19 : y(point.value!) - 10} textAnchor="middle" className="plotValue">{format(point.value!)}</text>
       </g>)}
-      <DateAxis dates={points.map(point => point.date)} x={x} bottom={bottom} width={chartWidth} right={right} label={xAxisLabel} />
+      <DateAxis dates={points.map(point => point.date)} x={x} bottom={bottom} width={chartWidth} right={right} label={xAxisLabel} labelY={388} />
     </svg>
   </div>{assessment === 'quality' && <Legend items={[{ color: green, label: 'лучше: больше повторов' }, { color: blue, label: 'без заметного изменения' }, { color: coral, label: 'хуже: меньше повторов' }]} />}
     {assessment === 'rir' && <Legend items={[{ color: coral, label: 'ПДО < 1: почти без запаса' }, { color: green, label: 'ПДО 1–3: 1–3 повтора в запасе' }, { color: amber, label: 'ПДО > 3: больше запаса' }, { color: grey, label: 'Легкая неделя' }]} />}
@@ -121,15 +121,16 @@ export function LineGraph({ rows, field, label, unit }: {
 export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles: boolean }) {
   const { ref, width } = useWidth()
   if (!rows.length) return <div className="emptyCard">{allMuscles ? 'График появится после завершённой тренировки с рабочими силовыми подходами.' : 'График появится после завершённой силовой тренировки с указанной мышцей упражнения.'}</div>
+  const hasTarget = !allMuscles && rows.some(row => row.target_low !== null && row.target_high !== null)
   const max = stepFor(Math.max(...rows.map(row => Math.max(row.working_sets, allMuscles ? 0 : row.target_high ?? row.working_sets)))) * 4
-  const left = 52, right = 10, top = 26, bottom = 190
+  const left = 52, right = 10, top = 26, bottom = 320
   const chartWidth = Math.max(width, rows.length * 86 + left + right)
   const plotWidth = chartWidth - left - right, plotHeight = bottom - top
   const slot = plotWidth / rows.length
   const barWidth = Math.min(32, slot * 0.5)
   const y = (value: number) => bottom - value / max * plotHeight
   return <div className="chartCard"><h3>Рабочие подходы по неделям</h3><div className="plotWrap" ref={ref}>
-    <svg width={chartWidth} height="265" viewBox={`0 0 ${chartWidth} 265`} role="img" aria-label={`Рабочие и жёсткие подходы, ${allMuscles ? 'все мышцы' : rows[0].group}`}>
+    <svg width={chartWidth} height="395" viewBox={`0 0 ${chartWidth} 395`} role="img" aria-label={`Рабочие и жёсткие подходы, ${allMuscles ? 'все мышцы' : rows[0].group}`}>
       <Axis width={chartWidth} top={top} bottom={bottom} left={left} right={right} min={0} max={max} unit="Рабочие подходы" />
       {rows.map((row, i) => {
         const center = left + (i + 0.5) * slot
@@ -147,10 +148,10 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
           <text x={center} y={Math.max(top + 12, y(row.working_sets) - 6)} textAnchor="middle" className="plotBarValue">{format(row.working_sets)}</text>
         </g>
       })}
-      <DateAxis dates={rows.map(row => row.week_start)} x={i => left + (i + 0.5) * slot} bottom={bottom} width={chartWidth} right={right} label="Неделя" />
+      <DateAxis dates={rows.map(row => row.week_start)} x={i => left + (i + 0.5) * slot} bottom={bottom} width={chartWidth} right={right} label="Неделя" labelY={388} />
     </svg>
-  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Легкая неделя' }] : [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Легкая неделя' }]} />
-    <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — жёсткие рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : 'Цвет определяется по числу рабочих подходов относительно цели.'}</p></div>
+  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Легкая неделя' }] : hasTarget ? [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Легкая неделя' }] : [{ color: blue, label: 'объём зоны без отдельной цели' }, { color: grey, label: 'Легкая неделя' }]} />
+    <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : hasTarget ? 'Цвет определяется по числу рабочих подходов относительно цели.' : 'У этой анатомической зоны нет отдельной недельной цели; она входит в цель крупной мышечной группы.'}</p></div>
 }
 
 export function ExerciseTrend({ points, label }: { points: Progress['exercises'][number]['points']; label?: string }) {

@@ -20,6 +20,30 @@ class SettingsIn(BaseModel):
         return value
 
 
+class ProfileIn(BaseModel):
+    sex: Literal["male", "female"]
+    display_name: str = Field(min_length=1, max_length=80)
+    birth_date: date
+
+    @field_validator("display_name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Укажите имя")
+        return value
+
+    @field_validator("birth_date")
+    @classmethod
+    def valid_birth_date(cls, value: date) -> date:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("Europe/Moscow")).date()
+        if value >= today or value.year < 1900:
+            raise ValueError("Укажите прошедшую дату рождения")
+        return value
+
+
 class TemplateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     muscle_group: str = Field(min_length=1, max_length=120)

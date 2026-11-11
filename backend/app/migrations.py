@@ -94,3 +94,18 @@ def migrate(engine):
             # The inputs behind an old plan are unknown, even when its targets
             # and short action label survive. Never reconstruct them from today.
             connection.execute(text("INSERT INTO schema_versions (version) VALUES (6)"))
+        if version < 7:
+            inspector.clear_cache()
+            existing = {column["name"] for column in inspector.get_columns("users")}
+            for name, specification in {"sex": "VARCHAR(8)", "display_name": "VARCHAR(80)",
+                                        "birth_date": "DATE"}.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {name} {specification}"))
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (7)"))
+        if version < 8:
+            inspector.clear_cache()
+            existing = {column["name"] for column in inspector.get_columns("users")}
+            if "telegram_username" not in existing:
+                connection.execute(text("ALTER TABLE users ADD COLUMN telegram_username VARCHAR(32)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_username ON users (telegram_username)"))
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (8)"))

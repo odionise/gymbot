@@ -13,12 +13,12 @@ export function ProgressView() {
   const [exercise, setExercise] = useState('all')
   const [error, setError] = useState('')
   useEffect(() => { api.progress().then(setData).catch(err => setError((err as Error).message)) }, [])
-  const groupOptions = [{ value: 'all', label: 'Все мышцы' }, ...[...new Set(data?.weeks.map(row => row.group) ?? [])].map(value => ({ value, label: value }))]
+  const groupOptions = [{ value: 'all', label: 'Все' }, ...[...new Set(data?.weeks.map(row => row.group) ?? [])].map(value => ({ value, label: value }))]
   const rows = (data?.weeks ?? []).filter(row => group === 'all' || row.group === group)
   const summaryUnavailable = group === 'all' && data !== null && data.weekly_summary === undefined
   const trendRows: WeekRow[] = group === 'all' ? data?.weekly_summary ?? [] : rows
   const unknownRirSets = data?.weekly_summary?.reduce((sum, row) => sum + row.rir_unknown_sets, 0) ?? 0
-  const exerciseOptions = [{ value: 'all', label: 'Все упражнения' }, ...(data?.exercises ?? []).filter(item => group === 'all' || item.groups.includes(group)).map(item => ({ value: item.id, label: item.label ?? item.name }))]
+  const exerciseOptions = [{ value: 'all', label: 'Все' }, ...(data?.exercises ?? []).filter(item => group === 'all' || item.groups.includes(group)).map(item => ({ value: item.id, label: item.label ?? item.name }))]
   const points = (data?.exercises ?? []).filter(item => exercise === 'all' || item.id === exercise).flatMap(item => item.points.filter(point => group === 'all' || point.groups.includes(group)))
   const tableExercises = (data?.exercises ?? []).filter(item => (exercise === 'all' || item.id === exercise) && (group === 'all' || item.groups.includes(group)))
   return <><div className="eyebrow">Ваши результаты</div><h1>Прогресс</h1>

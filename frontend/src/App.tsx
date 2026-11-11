@@ -4,10 +4,13 @@ import { HistoryView } from './HistoryView'
 import { ProgramView } from './ProgramView'
 import { ProgressView } from './ProgressView'
 import { WorkoutView } from './WorkoutView'
-import { IconAdjustmentsHorizontal, IconCalendarWeek, IconChartLine, IconHistory, IconPlus } from '@tabler/icons-react'
+import { ProfileForm } from './ProfileForm'
+import { AdminView } from './AdminView'
+import { MuscleDiagram } from './MuscleDiagram'
+import { IconAdjustmentsHorizontal, IconCalendarWeek, IconChartLine, IconHistory, IconPlus, IconShieldLock } from '@tabler/icons-react'
 import type { Me, NextWeek, Template, WorkoutSession } from './types'
 
-type Tab = 'today' | 'progress' | 'history' | 'program'
+type Tab = 'today' | 'progress' | 'history' | 'program' | 'admin'
 const weekdays = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 export const phaseText = { light: 'Лёгкая', medium: 'Средняя', heavy: 'Тяжёлая', accumulation: 'Накопление', deload: 'Легкая неделя' }
 export const formatWeight = (weight: number) => weight.toLocaleString('ru-RU', { maximumFractionDigits: 2 })
@@ -24,6 +27,7 @@ function NavIcon({ name }: { name: Tab }) {
     progress: <IconChartLine aria-hidden="true" stroke={1.7} />,
     history: <IconHistory aria-hidden="true" stroke={1.7} />,
     program: <IconAdjustmentsHorizontal aria-hidden="true" stroke={1.7} />,
+    admin: <IconShieldLock aria-hidden="true" stroke={1.7} />,
   }
   return icons[name]
 }
@@ -32,6 +36,7 @@ const faqItems = [
   {
     question: 'С чего начать?',
     paragraphs: [
+      'При первом /start или открытии Mini App заполните анкету: пол, имя и дату рождения. Пол выбирает силуэт на карточке; ответы можно изменить в разделе «Программа».',
       'В «Списке упражнений» добавьте движения и укажите их тип. Для силового упражнения выберите основную и дополнительные мышцы.',
       'В «Программе» создайте тренировочные дни, выберите упражнения и задайте стартовый вес, диапазон повторов и подходы. Для кардио или растяжки задайте длительность в минутах.',
     ],
@@ -86,6 +91,13 @@ const faqItems = [
       'Обычно идут три недели накопления нагрузки и затем легкая неделя. Объём может расти постепенно по результатам; при усталости план удержит или снизит его.',
       'На легкой неделе подходов примерно вдвое меньше, вес не повышается, цель — ПДО 4. Пропуск отдельной тренировки сам по себе фазу не переключает.',
       'Восстановление оценивается только по новым рабочим подходам с указанным ПДО.',
+    ],
+  },
+  {
+    question: 'Что означают цвета на схеме мышц?',
+    paragraphs: [
+      'Две фигуры на карточке сегодняшней тренировки показывают мышцы спереди и сзади. Красным отмечены основные мышцы упражнений, синим — дополнительные. Чем больше запланированных подходов для дополнительной мышцы, тем темнее синий.',
+      'Схема строится по плану выбранного занятия: один рабочий подход даёт основной мышце 1, дополнительной — 0,5. Пропущенное упражнение, кардио и растяжка подсветку не создают. Фактические результаты показаны отдельно в прогрессе.',
     ],
   },
   {
@@ -161,9 +173,14 @@ export default function App() {
   const [error, setError] = useState('')
   const [nextWeek, setNextWeek] = useState<NextWeek | null>(null)
   const [weekMenuOpen, setWeekMenuOpen] = useState(false)
+  const [editingProfile, setEditingProfile] = useState(false)
 
   const refresh = useCallback(async () => {
     const version = ++programRequestVersion.current
+    const profile = await api.me()
+    if (version !== programRequestVersion.current) return
+    setMe(profile)
+    if (!profile.profile_complete) return
     const programRequest = api.templates().then(program => {
       if (version !== programRequestVersion.current) return
       setTemplates(program)
@@ -174,16 +191,15 @@ export default function App() {
       throw err
     })
     // A failure in today's plan must not discard an already loaded program.
-    const loaded = await Promise.all([api.me(), programRequest, api.today(), api.history(), api.nextWeek()]).catch(err => {
+    const loaded = await Promise.all([programRequest, api.today(), api.history(), api.nextWeek()]).catch(err => {
       if (version === programRequestVersion.current) throw err
       return null
     })
     if (!loaded || version !== programRequestVersion.current) return
-    const [profile, , today, history, upcoming] = loaded
+    const [, today, history, upcoming] = loaded
     const dateParts = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: profile.timezone }).formatToParts(new Date())
     const part = (type: string) => dateParts.find(item => item.type === type)?.value ?? ''
     const localDate = `${part('year')}-${part('month')}-${part('day')}`
-    setMe(profile)
     setSessions(today)
     setCompletedToday(history.filter(item => (item.actual_date ?? item.scheduled_date) === localDate))
     setNextWeek(upcoming)
@@ -192,7 +208,7 @@ export default function App() {
   useEffect(() => {
     refresh().then(async () => {
       const sessionId = new URLSearchParams(window.location.search).get('session')
-      if (sessionId) {
+      if (sessionId && (await api.me()).profile_complete) {
         try { setSelected(await api.session(sessionId)) } catch { /* expired deep link */ }
       }
     }).catch((err: Error) => setError(err.message)).finally(() => setLoading(false))
@@ -231,6 +247,11 @@ export default function App() {
 
   if (loading) return <div className="loading"><span className="loadingMark" />Загружаем тренировку<span className="loadingDots">…</span></div>
 
+  if (!me?.profile_complete) return <div className="appShell"><main className="page">
+    {me ? <ProfileForm profile={me} onSaved={profile => { setMe(profile); refresh().catch((err: Error) => setError(err.message)) }} />
+      : <div className="emptyCard" role="alert"><h2>Профиль не загрузился</h2><p>{error || 'Проверьте соединение.'}</p><button className="outlineButton" onClick={retryLoad}>Повторить загрузку</button></div>}
+  </main></div>
+
   const todayLabel = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', weekday: 'long', timeZone: me?.timezone || 'Europe/Moscow' }).format(new Date())
   const completedSets = completedToday.reduce((sum, item) => sum + item.exercises.reduce((count, exercise) => count + (exercise.kind === 'strength' ? exercise.results.length : exercise.actual_duration_minutes ? 1 : 0), 0), 0)
   const upcomingLabel = nextWeek ? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${nextWeek.week_start}T12:00:00Z`)) : ''
@@ -245,13 +266,14 @@ export default function App() {
         onComplete={() => { setError(''); setSelected(null); refresh().catch((err: Error) => setError(err.message)); setTab('history') }}
         onError={setError}
       /> : tab === 'today' ? <>
-        <div className="eyebrow">{todayLabel}</div>
+        <div className="eyebrow todayDate">{todayLabel}</div>
         <div className="todayHeading"><h1>Сегодня</h1><div className="nextWeekControl"><button className="nextWeekTrigger" type="button" aria-expanded={weekMenuOpen} onClick={() => setWeekMenuOpen(!weekMenuOpen)}>Следующая неделя{nextWeek?.kind ? `: ${nextWeek.kind === 'vacation' ? 'отпуск' : 'легкая'}` : ''} <span aria-hidden="true">⌄</span></button>{weekMenuOpen && <div className="nextWeekMenu"><strong>Неделя с {upcomingLabel}</strong><p>Выберите исключение из обычного плана. Решение можно отменить до начала недели.</p><button className={nextWeek?.kind === 'deload' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('deload')); setWeekMenuOpen(false) })}>Легкая неделя <small>Меньше подходов, ПДО 4</small></button><button className={nextWeek?.kind === 'vacation' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('vacation')); setWeekMenuOpen(false) })}>Отпуск <small>Без тренировок; цикл продолжится позже</small></button>{nextWeek?.kind && <button className="clearWeek" onClick={() => run(async () => { setNextWeek(await api.clearNextWeek()); setWeekMenuOpen(false) })}>Отменить решение</button>}</div>}</div></div>
         {sessions.length ? <div className="sessionList">{sessions.map(session =>
           <article className="heroSession" key={session.id}>
             <div className="heroTop"><span className="heroKicker">Тренировка по плану</span><span className={`phasePill phase-${session.phase}`}>{phaseText[session.phase]}</span></div>
-            <h2 className="heroTitle">{session.template_name}</h2>
-            <div className="heroMeta">{session.muscle_group} · {session.exercises.length} {countWord(session.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</div>
+            <div className="heroIntroduction"><div className="heroIntroductionText"><h2 className="heroTitle">{session.template_name}</h2>
+            <div className="heroMeta">{session.muscle_group} · {session.exercises.length} {countWord(session.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</div></div>
+            {me?.sex && <MuscleDiagram sex={me.sex} exercises={session.exercises} />}</div>
             <div className="phaseRail" aria-label={`Фаза цикла: ${phaseText[session.phase]}`}><span className="current" /><span className={session.phase === 'deload' ? 'current' : ''} /></div>
             <div className="heroExercises">{session.exercises.slice(0, 3).map(item => <div className="heroExercise" key={item.id}><span>{item.name}</span><strong>{item.kind === 'strength' ? `${formatWeight(item.target_weight)} кг · ${item.sets_count} × ${item.target_reps}` : `${item.target_duration_minutes} мин`}</strong></div>)}{session.exercises.length > 3 && <span className="heroMore">И ещё {session.exercises.length - 3}</span>}</div>
             <button className="heroFooter" onClick={() => openSession(session.id)}><span>{session.status === 'in_progress' ? 'Продолжить тренировку' : 'Начать тренировку'}</span><span aria-hidden="true">→</span></button>
@@ -268,9 +290,9 @@ export default function App() {
         )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу</button>}
         {me && !me.has_started_bot && <p className="hint">Чтобы получать сообщения, сначала отправьте боту команду /start.</p>}
         <HomeFaq />
-      </> : tab === 'program' ? <ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} />
+      </> : tab === 'program' ? <><div className="profileShortcut"><span>{me?.display_name}{me?.age !== null ? ` · ${me?.age} лет` : ''}</span><button type="button" className="textButton" onClick={() => setEditingProfile(!editingProfile)}>{editingProfile ? 'Свернуть анкету' : 'Изменить анкету'}</button></div>{editingProfile && me && <ProfileForm profile={me} onSaved={profile => { setMe(profile); setEditingProfile(false) }} onClose={() => setEditingProfile(false)} />}<ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} /></>
         : tab === 'progress' ? <ProgressView />
-          : <HistoryView />}
+          : tab === 'admin' && me.is_admin ? <AdminView /> : <HistoryView />}
     </main>
 
     {!selected && <nav className="bottomNav" aria-label="Навигация">
@@ -278,6 +300,7 @@ export default function App() {
       <button className={tab === 'progress' ? 'active' : ''} onClick={() => setTab('progress')}><NavIcon name="progress" />Прогресс</button>
       <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><NavIcon name="history" />История</button>
       <button className={tab === 'program' ? 'active' : ''} onClick={() => setTab('program')}><NavIcon name="program" />Программа</button>
+      {me.is_admin && <button className={tab === 'admin' ? 'active' : ''} onClick={() => setTab('admin')}><NavIcon name="admin" />Админ</button>}
     </nav>}
   </div>
 }

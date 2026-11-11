@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { IconChevronDown, IconX } from '@tabler/icons-react'
 import { api } from './api'
@@ -74,7 +74,8 @@ export function ProgramView({ templates, run }: {
   run: (action: () => Promise<unknown>) => Promise<void>
 }) {
   const templateSubmission = useSubmission()
-  const [selectedId, setSelectedId] = useState<string | null>(templates[0]?.id ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(templates.length === 0)
   const selected = templates.find(item => item.id === selectedId)
   const [name, setName] = useState('')
   const [selectedGroups, setSelectedGroups] = useState<string[]>([])
@@ -113,7 +114,9 @@ export function ProgramView({ templates, run }: {
     await templateSubmission.submit(() => run(async () => {
       const data = { name, muscle_group: selectedGroups.join(', '), weekday, send_time: sendTime }
       if (selected && editingTemplate) await api.updateTemplate(selected.id, data)
-      else { const created = await api.createTemplate(data); setSelectedId(created.id) }
+      else await api.createTemplate(data)
+      setSelectedId(null)
+      setCreating(false)
       setEditingTemplate(false)
     }))
   }
@@ -125,7 +128,26 @@ export function ProgramView({ templates, run }: {
     if (!window.confirm(`Удалить «${exercise.name}» из программы? История сохранится.`)) return
     await run(() => api.deleteExercise(exercise.id))
   }
-  const showForm = !selected || editingTemplate
+  const showForm = creating || editingTemplate
+  const runAndCollapse = (action: () => Promise<unknown>) => run(async () => {
+    await action()
+    setSelectedId(null)
+    setExerciseEditor(null)
+    setReplacementEditor(null)
+  })
+
+  const selectedPanel = selected && !editingTemplate && <section className="programSessionBlock" aria-label={`Настройка тренировки ${selected.name}`}>
+      <div className="programCard"><div className="programCardTop"><span>{weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
+      <div className="sectionHead"><h2>Упражнения</h2><span>{selected.exercises.length}</span></div>
+      {selected.exercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; const replacing = replacementEditor === exercise.id; return <div className="programExerciseItem" key={exercise.id}>
+        <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement && movement.kind !== 'strength' ? `${movementKinds[movement.kind]} · ${exercise.duration_minutes ?? '—'} мин` : `${movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · ${exercise.sets_count} подхода · ${exercise.rep_min}–${exercise.rep_max} · ${formatWeight(exercise.medium_weight)} кг`}</small></div><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
+        <div className="programActions"><button type="button" onClick={() => { setReplacementEditor(null); setExerciseEditor(expanded ? null : exercise.id) }} disabled={!catalogLoadedAt} aria-expanded={expanded} aria-controls={`exercise-editor-${exercise.id}`}>Изменить настройки</button><button type="button" onClick={() => { setExerciseEditor(null); setReplacementEditor(replacing ? null : exercise.id) }} disabled={!catalogLoadedAt} aria-expanded={replacing} aria-controls={`exercise-replacement-${exercise.id}`}>Заменить упражнение</button></div>
+        {expanded && <div className="programInlineEditor" id={`exercise-editor-${exercise.id}`}><ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} exercise={exercise} onClose={() => setExerciseEditor(null)} run={runAndCollapse} /></div>}
+        {replacing && <div className="programInlineEditor" id={`exercise-replacement-${exercise.id}`}><ExerciseReplacement exercise={exercise} movements={movements} detailGroups={detailGroups} onClose={() => setReplacementEditor(null)} onReplaced={result => setReplacementNotice(`В программе теперь «${result.exercise.name}». ${result.history_mode === 'resume' ? 'Прежняя база результатов продолжена.' : 'Начата новая база результатов.'} Замена действует со следующей новой тренировки. Уже созданные занятия сохранены (${result.preserved_sessions_count}).`)} run={runAndCollapse} /></div>}
+      </div> })}
+      {exerciseEditor === 'new' && <ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} onClose={() => setExerciseEditor(null)} run={runAndCollapse} />}
+      {exerciseEditor !== 'new' && <button className="outlineButton" disabled={!catalogLoadedAt} onClick={() => { setReplacementEditor(null); setExerciseEditor('new') }}>+ Добавить упражнение</button>}
+    </section>
 
   return <>
     <div className="eyebrow">Настройки тренировок</div><h1>Программа</h1>
@@ -133,25 +155,39 @@ export function ProgramView({ templates, run }: {
     {replacementNotice && <p className="hint" role="status">{replacementNotice}</p>}
     {catalogError && <div className="emptyCard" role="alert"><p>Не удалось загрузить справочник. {catalogError}</p>{catalogLoadedAt && <p>Показана версия от {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'long' }).format(new Date(catalogLoadedAt))}.</p>}<button className="outlineButton" onClick={() => setCatalogReload(value => value + 1)}>Повторить загрузку справочника</button></div>}
     {!catalogLoadedAt && !catalogError && <p className="hint" role="status">Загружаем справочник упражнений…</p>}
-    <div className="programPicker">{templates.map(item => <button className={selectedId === item.id ? 'chosen' : ''} key={item.id} onClick={() => { setSelectedId(item.id); setEditingTemplate(false); setExerciseEditor(null); setReplacementEditor(null); setReplacementNotice('') }}>{item.name}</button>)}<button className={!selected ? 'chosen addProgram' : 'addProgram'} onClick={() => { setSelectedId(null); setName(''); setSelectedGroups([]); setGroupError(''); setWeekday(0); setSendTime('09:00'); setEditingTemplate(false); setExerciseEditor(null); setReplacementEditor(null); setReplacementNotice('') }}>+ Новая</button></div>
-    {showForm ? <form className="editorPanel" onSubmit={saveTemplate} aria-busy={templateSubmission.busy}><fieldset className="formFields" disabled={templateSubmission.busy}>
+    <div className="programPicker" aria-label="Тренировки программы">
+      {templates.map(item => <Fragment key={item.id}>
+        <button type="button" className={selectedId === item.id ? 'chosen' : ''} aria-expanded={selectedId === item.id} onClick={() => {
+          setSelectedId(current => current === item.id ? null : item.id)
+          setCreating(false)
+          setEditingTemplate(false)
+          setExerciseEditor(null)
+          setReplacementEditor(null)
+          setReplacementNotice('')
+        }}><span className="programTileName">{item.name}</span><span className="programTileMeta">{weekdays[item.weekday]} · {item.send_time}</span></button>
+        {selectedId === item.id && selectedPanel && <div className="programExpand" key={`details-${item.id}`}>{selectedPanel}</div>}
+      </Fragment>)}
+      <button type="button" className={creating ? 'chosen addProgram' : 'addProgram'} aria-label="Новая тренировка" aria-expanded={creating} onClick={() => {
+        setCreating(current => !current)
+        setSelectedId(null)
+        setName('')
+        setSelectedGroups([])
+        setGroupError('')
+        setWeekday(0)
+        setSendTime('09:00')
+        setEditingTemplate(false)
+        setExerciseEditor(null)
+        setReplacementEditor(null)
+        setReplacementNotice('')
+      }}><span aria-hidden="true">+</span><span className="programTileMeta">Новая тренировка</span></button>
+    </div>
+    {showForm && <form className="editorPanel" onSubmit={saveTemplate} aria-busy={templateSubmission.busy}><fieldset className="formFields" disabled={templateSubmission.busy}>
       <div className="editorTitle"><h2>{editingTemplate ? 'Изменить тренировку' : 'Новая тренировка'}</h2>{editingTemplate && <button type="button" onClick={() => setEditingTemplate(false)}>×</button>}</div>
       <label className="field"><span>Название тренировки</span><input required maxLength={120} value={name} placeholder="Например, Грудь и трицепс" onChange={event => setName(event.target.value)} /></label>
       <div className="groupField"><span className="filterLabel">Разделы тренировки</span>{selectedGroups.length > 0 && <div className="groupChips">{selectedGroups.map(group => <button type="button" key={group} onClick={() => setSelectedGroups(selectedGroups.filter(item => item !== group))} aria-label={`Убрать раздел ${group}`}>{group}<IconX size={15} stroke={1.8} aria-hidden="true" /></button>)}</div>}{suggestedGroups.some(group => !selectedGroups.includes(group)) ? <ChoiceDropdown label="Разделы тренировки" hideLabel value="" options={suggestedGroups.filter(group => !selectedGroups.includes(group)).map(group => ({ value: group, label: group }))} placeholder="+ Добавить раздел" onChange={group => { setSelectedGroups([...selectedGroups, group]); setGroupError('') }} /> : <div className="allGroupsSelected">Все разделы выбраны</div>}{groupError && <small className="fieldError" role="alert">{groupError}</small>}</div>
       <div className="fieldGrid scheduleFields"><ChoiceDropdown label="День недели" value={String(weekday)} options={weekdays.map((day, index) => ({ value: String(index), label: day }))} onChange={value => setWeekday(Number(value))} /><TimePicker label="Начало тренировки" value={sendTime} onChange={setSendTime} /></div>
       <button className="primaryButton" type="submit">Сохранить тренировку</button>
-    </fieldset></form> : selected && <section className="programSessionBlock" aria-label={`Настройка тренировки ${selected.name}`}>
-      <div className="programCard"><div className="programCardTop"><span>{weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
-      <div className="sectionHead"><h2>Упражнения</h2><span>{selected.exercises.length}</span></div>
-      {selected.exercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; const replacing = replacementEditor === exercise.id; return <div className="programExerciseItem" key={exercise.id}>
-        <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement && movement.kind !== 'strength' ? `${movementKinds[movement.kind]} · ${exercise.duration_minutes ?? '—'} мин` : `${movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · ${exercise.sets_count} подхода · ${exercise.rep_min}–${exercise.rep_max} · ${formatWeight(exercise.medium_weight)} кг`}</small></div><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
-        <div className="programActions"><button type="button" onClick={() => { setReplacementEditor(null); setExerciseEditor(expanded ? null : exercise.id) }} disabled={!catalogLoadedAt} aria-expanded={expanded} aria-controls={`exercise-editor-${exercise.id}`}>Изменить настройки</button><button type="button" onClick={() => { setExerciseEditor(null); setReplacementEditor(replacing ? null : exercise.id) }} disabled={!catalogLoadedAt} aria-expanded={replacing} aria-controls={`exercise-replacement-${exercise.id}`}>Заменить упражнение</button></div>
-        {expanded && <div className="programInlineEditor" id={`exercise-editor-${exercise.id}`}><ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} exercise={exercise} onClose={() => setExerciseEditor(null)} run={run} /></div>}
-        {replacing && <div className="programInlineEditor" id={`exercise-replacement-${exercise.id}`}><ExerciseReplacement exercise={exercise} movements={movements} detailGroups={detailGroups} onClose={() => setReplacementEditor(null)} onReplaced={result => setReplacementNotice(`В программе теперь «${result.exercise.name}». ${result.history_mode === 'resume' ? 'Прежняя база результатов продолжена.' : 'Начата новая база результатов.'} Замена действует со следующей новой тренировки. Уже созданные занятия сохранены (${result.preserved_sessions_count}).`)} run={run} /></div>}
-      </div> })}
-      {exerciseEditor === 'new' && <ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} onClose={() => setExerciseEditor(null)} run={run} />}
-      {exerciseEditor !== 'new' && <button className="outlineButton" disabled={!catalogLoadedAt} onClick={() => { setReplacementEditor(null); setExerciseEditor('new') }}>+ Добавить упражнение</button>}
-    </section>}
+    </fieldset></form>}
     {catalogLoadedAt && <MovementCatalog movements={movements} detailGroups={detailGroups} refreshMovements={async () => setMovements(await api.movements())} run={run} />}
   </>
 }

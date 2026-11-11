@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import SessionExercise, TrainingWeek, User, WorkoutSession
-from .muscles import split_details, split_muscle_groups
+from .muscles import VOLUME_TARGET_GROUPS, split_details, split_muscle_groups
 from .planning import PHASES, monday
 from .history import snapshot_key
 
@@ -95,6 +95,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
         target_high = min(custom[1], target_low + 2)
         quality = [mean(values) for key, values in data["reps"].items()
                    if phase == "accumulation" and len(comparable[(group, key)]) >= 2]
+        has_target = group in VOLUME_TARGET_GROUPS
         row = {"week_start": start.isoformat(), "group": group, "phase": phase,
                "deload_reason": week.deload_reason if week else None,
                "hard_sets": round(data["hard_sets"], 1),
@@ -102,8 +103,8 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                "tonnage": round(data["tonnage"], 1),
                "avg_rir": round(mean(data["rirs"]), 1) if data["rirs"] else None,
                "avg_reps_hard": round(mean(quality), 1) if quality else None,
-               "target_low": 5 if phase == "deload" else target_low,
-               "target_high": 8 if phase == "deload" else target_high}
+               "target_low": (5 if phase == "deload" else target_low) if has_target else None,
+               "target_high": (8 if phase == "deload" else target_high) if has_target else None}
         if phase == "deload":
             prior = [r for r in rows if r["group"] == group and r["phase"] == "accumulation"]
             baseline = median(r["working_sets"] for r in prior[-2:]) if prior else None
@@ -111,13 +112,13 @@ def progress_for_user(db: Session, user_id: int) -> dict:
             if row["missed_deload"]:
                 row["phase"] = "missed_deload"
                 signals.append(f"{group}: Легкая неделя не снизила объём")
-            if row["working_sets"] < 5 and start + timedelta(days=6) < local_today:
+            if has_target and row["working_sets"] < 5 and start + timedelta(days=6) < local_today:
                 signals.append(f"{group}: в легкую неделю менее 5 рабочих подходов")
         else:
             row["missed_deload"] = False
-            if row["hard_sets"] < 10 and start + timedelta(days=6) < local_today:
+            if has_target and row["hard_sets"] < 10 and start + timedelta(days=6) < local_today:
                 signals.append(f"{group}: менее 10 жёстких подходов за неделю")
-            if row["hard_sets"] > 20:
+            if has_target and row["hard_sets"] > 20:
                 signals.append(f"{group}: объём превысил 20 жёстких подходов")
             if row["avg_rir"] is not None and row["avg_rir"] < 1:
                 signals.append(f"{group}: средний ПДО ниже 1 — проверьте восстановление")

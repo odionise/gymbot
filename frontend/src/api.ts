@@ -11,12 +11,16 @@ export class ApiError extends Error {
   constructor(message: string, public readonly status: number) { super(message) }
 }
 
+let adminTargetId: number | null = null
+const programPath = (path: string) => /^\/(templates|movements|exercises)(\/|$)/.test(path)
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const initData = window.Telegram?.WebApp?.initData
   const devId = import.meta.env.VITE_DEV_TELEGRAM_ID
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (initData) headers.Authorization = `tma ${initData}`
   else if (devId) headers['X-Dev-User-Id'] = devId
+  if (adminTargetId !== null && programPath(path)) headers['X-Admin-Target-User-Id'] = String(adminTargetId)
   let response: Response
   try {
     response = await fetchApi(`/api${path}`, {
@@ -40,7 +44,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 const json = (value: unknown) => JSON.stringify(value)
 
 export const api = {
+  setAdminTarget: (id: number | null) => { adminTargetId = id },
+  adminUsers: (query: string) => request<{ telegram_id: number; username: string; display_name: string | null }[]>(`/admin/users?q=${encodeURIComponent(query)}`),
   me: () => request<Me>('/me'),
+  updateProfile: (data: { sex: 'male' | 'female'; display_name: string; birth_date: string }) =>
+    request<Me>('/me/profile', { method: 'PUT', body: json(data) }),
   updateMe: (timezone: string) => request<Me>('/me', { method: 'PATCH', body: json({ timezone }) }),
   updateVolumeCap: (volume_cap: number) => request<Me>('/me/volume-cap', { method: 'PATCH', body: json({ volume_cap }) }),
   muscleGroups: () => request<Record<string, string[]>>('/muscle-groups'),

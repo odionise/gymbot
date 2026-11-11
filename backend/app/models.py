@@ -22,6 +22,10 @@ class User(Base):
     timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     volume_cap: Mapped[int] = mapped_column(Integer, default=20)
+    sex: Mapped[str | None] = mapped_column(String(8))
+    display_name: Mapped[str | None] = mapped_column(String(80))
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    telegram_username: Mapped[str | None] = mapped_column(String(32), index=True)
 
 
 class WorkoutTemplate(Base):

@@ -1,6 +1,7 @@
 """No real Telegram calls: plans and reminder destinations stay private."""
 
 import asyncio
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -11,6 +12,10 @@ from app import bot
 from app.main import me
 from app.models import User, WorkoutSession
 from test_history import program
+
+
+def complete_profile(user):
+    user.sex, user.display_name, user.birth_date = 'male', 'Тест', date(1990, 1, 1)
 
 
 @pytest.mark.parametrize("kind", ["group", "supergroup", "channel"])
@@ -50,7 +55,9 @@ def test_reminders_do_not_use_legacy_group_or_foreign_destinations(database, mon
 
 def test_private_start_and_one_reminder_still_work(database, monkeypatch, clock):
     with database() as db:
-        program(db)
+        user, _, _ = program(db)
+        complete_profile(user)
+        db.commit()
     monkeypatch.setattr(bot, "SessionLocal", database)
     monkeypatch.setattr(bot, "get_settings", lambda: SimpleNamespace(public_url="https://synthetic.invalid"))
     message = SimpleNamespace(from_user=SimpleNamespace(id=1001),
@@ -72,6 +79,7 @@ def test_telegram_wait_does_not_hold_database_write_locks(database, monkeypatch,
     with database() as db:
         user, template, _ = program(db)
         user.chat_id = user.telegram_id
+        complete_profile(user)
         db.commit()
         get_or_create_session(db, template, START)  # Exercise the existing-plan path.
     monkeypatch.setattr(bot, "SessionLocal", database)

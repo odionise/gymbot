@@ -19,11 +19,11 @@ from .db import Base, engine, get_db, get_preview_db, locked_row
 from .migrations import migrate
 from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, new_id, utcnow
 from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used, movement_usage
-from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS
+from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS, VOLUME_TARGET_GROUPS
 from .planning import get_or_create_session, is_reentry, monday, movement_for, planned_counts, recommendation_context, resolve_week, vacation_override
 from .preview import preview_session
 from .recommendations import recommendation_dict, record_manual_target, save_recommendation
-from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
+from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, ProfileIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
 
@@ -139,6 +139,38 @@ def owned_session_exercise(db: Session, user: User, item_id: str) -> tuple[Worko
     return session, item
 
 
+ADMIN_TELEGRAM_ID = 5540948403
+
+
+def program_user(
+    actor: User = Depends(current_user), db: Session = Depends(get_db),
+    x_admin_target_user_id: int | None = Header(default=None),
+) -> User:
+    if x_admin_target_user_id is None:
+        return actor
+    if actor.telegram_id != ADMIN_TELEGRAM_ID:
+        raise HTTPException(403, "Доступно только администратору")
+    target = db.get(User, x_admin_target_user_id)
+    if target is None:
+        raise HTTPException(404, "Пользователь не найден")
+    return target
+
+
+@app.get("/api/admin/users")
+def admin_users(q: str, actor: User = Depends(current_user), db: Session = Depends(get_db)):
+    if actor.telegram_id != ADMIN_TELEGRAM_ID:
+        raise HTTPException(403, "Доступно только администратору")
+    query = q.strip().lstrip("@").lower()
+    if len(query) < 3 or len(query) > 32:
+        raise HTTPException(422, "Введите минимум три символа username")
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    users = db.scalars(select(User).where(
+        func.lower(User.telegram_username).like(f"%{escaped}%", escape="\\")
+    ).order_by(User.telegram_username).limit(20)).all()
+    return [{"telegram_id": user.telegram_id, "username": user.telegram_username,
+             "display_name": user.display_name} for user in users]
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -160,8 +192,24 @@ async def telegram_webhook(
 
 @app.get("/api/me")
 def me(user: User = Depends(current_user)):
-    return {"telegram_id": user.telegram_id, "timezone": user.timezone,
-            "volume_cap": user.volume_cap, "has_started_bot": user.chat_id == user.telegram_id}
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo(user.timezone)).date()
+    age = (today.year - user.birth_date.year -
+           ((today.month, today.day) < (user.birth_date.month, user.birth_date.day))) if user.birth_date else None
+    return {"telegram_id": user.telegram_id, "is_admin": user.telegram_id == ADMIN_TELEGRAM_ID,
+            "timezone": user.timezone,
+            "volume_cap": user.volume_cap, "has_started_bot": user.chat_id == user.telegram_id,
+            "sex": user.sex, "display_name": user.display_name,
+            "birth_date": user.birth_date.isoformat() if user.birth_date else None,
+            "age": age, "profile_complete": bool(user.sex and user.display_name and user.birth_date)}
+
+
+@app.put("/api/me/profile")
+def update_profile(data: ProfileIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    user.sex, user.display_name, user.birth_date = data.sex, data.display_name, data.birth_date
+    db.commit()
+    return me(user)
 
 
 @app.patch("/api/me")
@@ -190,12 +238,12 @@ def muscle_targets(user: User = Depends(current_user), db: Session = Depends(get
     return {group: {"min_sets": saved[group].min_sets if group in saved else 12,
                     "max_sets": saved[group].max_sets if group in saved else 18,
                     "cap_sets": saved[group].cap_sets if group in saved else user.volume_cap}
-            for group in ALL_DETAILED_GROUPS}
+            for group in VOLUME_TARGET_GROUPS}
 
 
 @app.put("/api/muscle-targets/{group}")
 def update_muscle_target(group: str, data: MuscleTargetIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    if group not in ALL_DETAILED_GROUPS:
+    if group not in VOLUME_TARGET_GROUPS:
         raise HTTPException(404, "Muscle group not found")
     item = db.scalar(select(MuscleTarget).where(MuscleTarget.user_id == user.telegram_id,
                                                 MuscleTarget.muscle_group == group))
@@ -209,14 +257,14 @@ def update_muscle_target(group: str, data: MuscleTargetIn, user: User = Depends(
 
 
 @app.get("/api/movements")
-def movements(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def movements(user: User = Depends(program_user), db: Session = Depends(get_db)):
     query = select(Movement, movement_usage(Movement.id)).where(
         Movement.user_id == user.telegram_id, Movement.active.is_(True)).order_by(Movement.name, Movement.id)
     return [movement_dict(item, used) for item, used in db.execute(query)]
 
 
 @app.post("/api/movements")
-def create_movement(data: MovementIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_movement(data: MovementIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     if data.is_anchor:
         for old in db.scalars(select(Movement).where(Movement.user_id == user.telegram_id,
                                                     Movement.primary_group == data.primary_group)):
@@ -230,7 +278,7 @@ def create_movement(data: MovementIn, user: User = Depends(current_user), db: Se
 
 
 @app.put("/api/movements/{movement_id}")
-def update_movement(movement_id: str, data: MovementIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_movement(movement_id: str, data: MovementIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = locked_movement(db, user, movement_id)
     used = movement_is_used(db, item.id)
     if used and data.kind != item.kind:
@@ -247,7 +295,7 @@ def update_movement(movement_id: str, data: MovementIn, user: User = Depends(cur
 
 
 @app.get("/api/templates")
-def templates(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def templates(user: User = Depends(program_user), db: Session = Depends(get_db)):
     items = db.scalars(select(WorkoutTemplate).where(
         WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True)
     ).order_by(WorkoutTemplate.weekday, WorkoutTemplate.name)).all()
@@ -255,7 +303,7 @@ def templates(user: User = Depends(current_user), db: Session = Depends(get_db))
 
 
 @app.post("/api/templates")
-def create_template(data: TemplateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_template(data: TemplateIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = WorkoutTemplate(user_id=user.telegram_id, **data.model_dump())
     db.add(item)
     db.commit()
@@ -264,7 +312,7 @@ def create_template(data: TemplateIn, user: User = Depends(current_user), db: Se
 
 
 @app.put("/api/templates/{template_id}")
-def update_template(template_id: str, data: TemplateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_template(template_id: str, data: TemplateIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = owned_template(db, user, template_id)
     for key, value in data.model_dump().items():
         setattr(item, key, value)
@@ -273,7 +321,7 @@ def update_template(template_id: str, data: TemplateIn, user: User = Depends(cur
 
 
 @app.delete("/api/templates/{template_id}")
-def delete_template(template_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_template(template_id: str, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = owned_template(db, user, template_id)
     item.active = False
     db.commit()
@@ -281,7 +329,7 @@ def delete_template(template_id: str, user: User = Depends(current_user), db: Se
 
 
 @app.post("/api/templates/{template_id}/exercises")
-def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     owned_template(db, user, template_id)
     template = locked_row(db, WorkoutTemplate,
         WorkoutTemplate.id == template_id, WorkoutTemplate.user_id == user.telegram_id,
@@ -304,7 +352,7 @@ def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(cur
 
 
 @app.put("/api/exercises/{exercise_id}")
-def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = current_exercise(db, user, exercise_id, lock=True)
     if data.movement_id is not None and data.movement_id != item.movement_id:
         raise HTTPException(409, "Для другого движения используйте действие «Заменить упражнение».")
@@ -325,7 +373,7 @@ def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(cur
 
 
 @app.delete("/api/exercises/{exercise_id}")
-def delete_exercise(exercise_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def delete_exercise(exercise_id: str, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = current_exercise(db, user, exercise_id, lock=True)
     changed = db.execute(update(Exercise).where(Exercise.id == item.id, Exercise.active.is_(True)).values(active=False))
     if changed.rowcount != 1:
@@ -336,14 +384,14 @@ def delete_exercise(exercise_id: str, user: User = Depends(current_user), db: Se
 
 
 @app.get("/api/exercises/{exercise_id}/history-options")
-def history_options(exercise_id: str, movement_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def history_options(exercise_id: str, movement_id: str, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = current_exercise(db, user, exercise_id)
     movement = owned_movement(db, user, movement_id)
     return available_history(db, item, movement)
 
 
 @app.post("/api/exercises/{exercise_id}/replace")
-def replace_exercise(exercise_id: str, data: ReplacementIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def replace_exercise(exercise_id: str, data: ReplacementIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = current_exercise(db, user, exercise_id, lock=True)
     movement = locked_movement(db, user, data.movement_id)
     settings = data.settings.model_dump(exclude_none=True)

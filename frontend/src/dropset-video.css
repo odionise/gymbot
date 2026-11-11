@@ -1,0 +1,166 @@
+/* Layout and scale measured against the supplied Dropset screen recording. */
+@font-face { font-family: 'Golos Text'; src: url('/fonts/GolosText-VariableFont_wght.ttf') format('truetype'); font-style: normal; font-weight: 400 900; font-display: swap; }
+:root, body, button, input, select, textarea, svg text { font-family: 'Golos Text', Arial, sans-serif; }
+:root {
+  --paper: #0c0c0e;
+  --ink: #f8f8fa;
+  --muted: #a3a3aa;
+  --line: #29292f;
+}
+html, body, #root, .appShell, .isWorkout { background: var(--paper); }
+.appShell { max-width: 520px; }
+.page { padding: 37px 16px 42px; }
+.page > h1, .todayHeading h1, .historyMonthHead h1 { font-size: clamp(2.25rem, 9.2vw, 3.15rem); line-height: 1.06; letter-spacing: -.055em; font-weight: 720; }
+.page > h1 { margin: 22px 0 16px; }
+.intro { margin: 0 0 33px; color: #bcbcc2; font-size: .91rem; line-height: 1.55; }
+.sectionHead { margin: 36px 0 14px; }
+.sectionHead h2 { font-size: 1.33rem; font-weight: 690; letter-spacing: -.035em; }
+.sectionHead > span { color: #777780; }
+.bottomNav { width: min(520px,100%); min-height: calc(70px + env(safe-area-inset-bottom)); background: #0c0c0ef5; box-shadow: 0 -1px #202025; }
+.bottomNav button { color: #53535a; }
+.bottomNav button.active { color: #fff; }
+.bottomNav svg { width: 24px; height: 24px; stroke-width: 1.9; }
+
+/* Workouts dashboard: selected content is a dark tile, lists stay on the canvas. */
+.heroSession, .completedSession { border: 0; border-radius: 29px; background: #222226; }
+.heroSession { padding: 23px; }
+.heroIntroduction { min-height: 175px; }
+.heroTitle { font-size: clamp(2.1rem, 9vw, 2.85rem); }
+.heroTop, .heroMeta, .heroKicker { color: #bcbcc2; }
+.heroExercise { border-bottom-color: #404047; }
+.heroFooter, .primaryButton, .isWorkout .finishButton { background: #fff; color: #0c0c0e; border-radius: 999px; }
+.heroFooter { margin-top: 12px; }
+.templateList, .historyList { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.templateMini { min-height: 95px; padding-inline: 2px; border-bottom: 1px solid var(--line); }
+.templateOrder { color: #777780; }
+.roundButton { width: 43px; height: 43px; border: 0; border-radius: 50%; background: #2e2e33; color: white; }
+
+/* Program and exercise library use flat rows with hierarchy carried by type and spacing. */
+.programPicker > button, .programPicker > button.chosen { min-height: 142px; border-color: #38383f; background: #222226; }
+.programPicker > button.chosen { border-color: #e9e9ec; background: #2a2a30; }
+.programTileName { font-size: 1.12rem; }
+.programSessionBlock, .settingsBlock.movementCatalog, .editorPanel:not(.programInlineEditor .editorPanel) {
+  padding: 0; border: 0; border-radius: 0; background: transparent;
+}
+.programSessionBlock { margin-top: 35px; }
+.programSessionBlock .programCard { padding: 0 0 18px; background: transparent; }
+.programCard h2 { font-size: 2rem; line-height: 1.05; }
+.programSessionBlock > .sectionHead { margin-top: 22px; border-color: var(--line); }
+.programExerciseItem { border-bottom-color: var(--line); padding-block: 8px; }
+.programExercise { min-height: 72px; border: 0; }
+.programExercise strong { font-size: 1rem; font-weight: 650; }
+.programExercise small { color: #aaaab1; }
+.programActions { gap: 22px; margin-top: 6px; }
+.programActions button { color: #ceced5; text-decoration: none; font-size: .8rem; }
+.programActions button:hover { color: white; }
+.programSessionBlock > .outlineButton { margin-top: 26px; }
+.programPicker .programExpand { grid-column: 1 / -1; min-width: 0; animation: programExpandIn 230ms ease-out both; }
+.programPicker .programExpand .programSessionBlock { margin: 0 0 8px; padding: 20px 2px 8px; border-top: 1px solid #46464d; }
+@keyframes programExpandIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+.movementCatalog { margin-top: 57px; }
+.movementCatalog > .sectionHead { margin-top: 0; }
+.catalogList { margin-top: 20px; }
+.catalogItem { border-color: var(--line); }
+.catalogItemRow { min-height: 102px; padding: 18px 0; }
+.catalogItemRow::before { width: 49px; height: 49px; border: 1px solid #424249; border-radius: 15px; background: #29292e; }
+.catalogItemRow strong { font-size: 1rem; font-weight: 670; }
+.catalogItemRow button { color: #a2a2aa; font-size: 1.15rem; }
+.catalogEditor, .programInlineEditor > .editorPanel { border: 0; background: #232328; border-radius: 24px; }
+.field input, .field select, .filterTrigger, .movementPickerTrigger { background: #29292e; border: 1px solid #3a3a41; }
+.field input:focus, .field select:focus, .filterTrigger:focus-visible { border-color: white; outline: none; }
+
+/* Recording a workout: full-bleed dark sheet, each exercise separated by a hairline. */
+.isWorkout .page { padding-top: 22px; padding-bottom: 130px; }
+.isWorkout .backButton { min-height: 50px; margin-bottom: 24px; font-size: 1.8rem; }
+.isWorkout .backButton span { display: none; }
+.workoutTitle h1 { margin: 7px 0 7px; font-size: clamp(2.5rem, 10vw, 3.5rem); }
+.workoutTitle p { color: #aaaab2; }
+.completionMeter { margin-top: 32px; border: 0; }
+.meterTrack { height: 5px; background: #2c2c32; }
+.isWorkout .exerciseCard { margin: 30px 0; padding: 24px 0 13px; border-top: 1px solid #2d2d33; background: transparent; }
+.exerciseHead .cardIndex { color: #8e8e96; }
+.exerciseHead h2 { margin-top: 9px; font-size: 1.55rem; }
+.exerciseCheck { color: white; }
+.targetLine, .isWorkout .targetLine { margin: 28px 0 20px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.targetLine > div + div, .isWorkout .targetLine > div + div { padding-left: 21px; border-left: 1px solid #303036; }
+.targetLine span { color: #aaaab2; }
+.targetLine strong, .isWorkout .targetLine strong { margin-top: 8px; font-size: clamp(2.25rem, 10vw, 3rem); letter-spacing: -.065em; font-weight: 690; }
+.targetReps > small { line-height: 1.3; }
+.setsList { margin-top: 26px; }
+.setsCaption { margin-bottom: 15px; color: #c8c8ce; }
+.setRow, .isWorkout .setRow { padding: 10px 0; border-top: 1px solid #2d2d33; }
+.setRow .setValueControl { border: 0; border-radius: 14px; background: #25252a; }
+.setStepButton { background: #2f2f35; }
+.setStepButton:first-child, .setStepButton:last-child { border-color: #3c3c43; }
+.setRow .setValueControl input { font-size: 1.06rem; }
+.setRow .savedSetActions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.savedSetMarker { display: inline-flex; align-items: center; gap: 6px; color: #b7d5c3; font-size: .78rem; font-weight: 680; white-space: nowrap; }
+.savedSetMarker > span { display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%; background: #35483d; color: #d2f3dc; font-size: .75rem; }
+.setRow .undoSet { padding: 5px 1px; border: 0; background: transparent; color: #9c9ca5; font-size: .78rem; cursor: pointer; }
+.setRow .undoSet:hover { color: #fff; }
+.setRow .undoSet:disabled { opacity: .45; cursor: default; }
+.setRow.isSaved .setValueControl { opacity: .66; }
+.setRow.isSaved .setValueControl input { color: #c8c8ce; }
+@media (max-width: 540px) {
+  .setRow .savedSetActions { grid-column: 2 / 4; grid-row: 3; min-height: 36px; justify-content: space-between; }
+}
+
+/* Dropdowns float above the following cards without shifting the page. */
+.progressFilters { position: relative; z-index: 40; }
+.progressFilter:has(.filterMenu) { z-index: 41; }
+.progressFilter .filterMenu { z-index: 42; }
+.todayHeading { position: relative; z-index: 40; }
+.todayHeading .nextWeekControl { position: relative; z-index: 41; }
+.todayHeading .nextWeekMenu { position: absolute; z-index: 42; top: calc(100% + 8px); right: 0; width: min(320px, calc(100vw - 32px)); }
+@media (prefers-reduced-motion: reduce) { .programPicker .programExpand { animation: none; } }
+.isWorkout .finishButton { min-height: 54px; }
+
+/* Calendar: tall open week rows, a bright selected day and a flat journal. */
+.historyMonthHead { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin: 7px 0 28px; }
+.historyMonthHead h1 { margin: 7px 0 0; text-transform: capitalize; }
+.historyOverline { color: #93939b; font-size: .75rem; }
+.historyMonthActions { display: flex; gap: 8px; }
+.historyMonthActions button { width: 37px; height: 37px; border: 0; border-radius: 50%; background: #28282d; color: white; font-size: 1.15rem; }
+.historyWeekdays { display: grid; grid-template-columns: repeat(7, 1fr); padding-bottom: 14px; color: #b3b3ba; font-size: .78rem; text-align: center; }
+.historyWeek { display: grid; grid-template-columns: repeat(7, 1fr); min-height: 104px; border-top: 1px solid #28282e; }
+.historyWeek button { position: relative; align-self: stretch; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 16px 0; border: 0; background: transparent; color: #d8d8de; font-size: .91rem; }
+.historyWeek button.outside { color: #52525a; }
+.historyWeek button span { min-width: 28px; height: 28px; display: grid; place-items: center; border-radius: 9px; }
+.historyWeek button.today span, .historyWeek button.selected span { background: white; color: #0c0c0e; font-weight: 700; }
+.historyWeek button.selected:not(.today) span { outline: 1px solid white; }
+.historyWeek button i { width: 6px; height: 6px; border-radius: 50%; background: #eeeef1; }
+.historyResults { margin-top: 24px; }
+.historyResults .sectionHead { margin-top: 0; }
+.historyCard { border-bottom: 1px solid #29292f; }
+.historyCard > button { min-height: 96px; }
+.historyCard h2 { font-size: 1.18rem; font-weight: 670; }
+.historyChevron { width: 35px; height: 35px; display: grid; place-items: center; border-radius: 50%; background: #2e2e33; color: white; }
+.historyNoResults { margin: 18px 0 40px; color: #a7a7af; font-size: .88rem; }
+
+/* Trends are the one prominent raised plane in the reference. */
+.chartCard { min-height: 410px; border: 0; border-radius: 28px; background: #232327; }
+.plotGrid { stroke: #434349; }
+.plotAxis { stroke: #696970; }
+.summaryCard { border: 0; border-radius: 23px; background: #222226; }
+
+@media (max-width: 390px) {
+  .page { padding-inline: 15px; }
+  .heroSession { padding: 20px; }
+  .historyWeek { min-height: 91px; }
+  .targetLine strong, .isWorkout .targetLine strong { font-size: 2.1rem; }
+  .programPicker > button, .programPicker > button.chosen { min-height: 134px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .historyWeek button span, .historyMonthActions button, .catalogItemRow button { transition: background-color .18s ease, color .18s ease, transform .18s ease; }
+  .historyMonthActions button:active, .catalogItemRow button:active { transform: scale(.93); }
+}
+.adminView h1 { margin: 16px 0; font-size: clamp(2.3rem, 10vw, 3.2rem); }
+.adminEyebrow { color: #a3a3aa; font-size: .8rem; }
+.adminSearch { display: flex; align-items: end; gap: 12px; margin: 30px 0 20px; }
+.adminSearch .field { flex: 1; margin: 0; }
+.adminSearch .primaryButton { min-height: 48px; }
+.adminMatches button { width: 100%; min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 2px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: white; text-align: left; }
+.adminMatches strong, .adminMatches small { display: block; }
+.adminMatches small { margin-top: 4px; color: #a3a3aa; }
+.adminMatches button > span:last-child { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: #29292e; }
+.adminError { color: #ffaba7; }
