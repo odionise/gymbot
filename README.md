@@ -23,7 +23,7 @@
 
 В переменных Production задайте `APP_ENV=production`, `BOT_TOKEN`, `DATABASE_URL`, `PUBLIC_URL=https://<домен-проекта>.vercel.app`, случайные `WEBHOOK_SECRET` и `CRON_SECRET`, `DEV_TELEGRAM_ID=0`, `REMINDERS_ENABLED=true`. Секреты храните только в настройках Vercel, не в Git. На Vercel API не регистрирует webhook и не запускает фоновый цикл при старте функции. После успешной проверки `/health` зарегистрируйте Telegram webhook на `PUBLIC_URL/telegram/webhook` с заголовком-секретом `WEBHOOK_SECRET`; затем задайте `PUBLIC_URL` в BotFather как адрес Mini App.
 
-Напоминания вызываются Vercel Schedule через защищённый `POST /api/internal/reminders` каждые 15 минут. На Hobby запуск может дополнительно задерживаться до 15 минут, поэтому доставка в точное время не гарантируется. Сборка не требует Docker на Vercel; локальный Docker Compose остаётся для самостоятельного запуска и проверок.
+Напоминания вызываются Vercel Schedule через защищённый `POST /api/internal/reminders` каждые 15 минут. На Hobby каждый запуск может дополнительно задерживаться до 15 минут: от назначенного пользователем времени до отправки может пройти почти 30 минут. Сборка не требует Docker на Vercel; локальный Docker Compose остаётся для самостоятельного запуска и проверок.
 
 ### Docker Compose на VPS
 

@@ -13,3 +13,5 @@ dist/
 backups/
 preview-*.jpg
 preview-*.png
+
+.vercel/
