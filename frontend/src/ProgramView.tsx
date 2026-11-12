@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
-import { IconChevronDown, IconX } from '@tabler/icons-react'
+import { Fragment, useEffect, useRef, useState } from 'react'
+import type { FormEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { IconChevronDown, IconGripVertical, IconX } from '@tabler/icons-react'
 import { api } from './api'
 import { ChoiceDropdown } from './ChoiceDropdown'
 import { muscleGroups as suggestedGroups, parseMuscleGroups } from './muscleGroups'
@@ -30,12 +30,13 @@ function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, 
   onClose: () => void; run: (action: () => Promise<unknown>) => Promise<void>
 }) {
   const { busy, submit } = useSubmission()
-  const [form, setForm] = useState<ExerciseInput>(exercise ? exerciseInput(exercise) : { ...emptyExercise, position: template.exercises.length })
+  const nextPosition = Math.max(-1, ...template.exercises.map(item => item.position)) + 1
+  const [form, setForm] = useState<ExerciseInput>(exercise ? exerciseInput(exercise) : { ...emptyExercise, position: nextPosition })
   const [pickerOpen, setPickerOpen] = useState(false)
   const [muscleFilter, setMuscleFilter] = useState('all')
   const [search, setSearch] = useState('')
   useEffect(() => {
-    setForm(exercise ? exerciseInput(exercise) : { ...emptyExercise, position: template.exercises.length })
+    setForm(exercise ? exerciseInput(exercise) : { ...emptyExercise, position: nextPosition })
     setPickerOpen(false)
     setMuscleFilter('all'); setSearch('')
   }, [exercise?.id, template.id])
@@ -49,7 +50,7 @@ function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, 
     event.preventDefault()
     if (!form.movement_id) return
     await submit(() => run(async () => {
-      if (exercise) await api.updateExercise(exercise.id, form)
+      if (exercise) await api.updateExercise(exercise.id, { ...form, position: exercise.position })
       else await api.createExercise(template.id, form)
       onClose()
     }))
@@ -64,14 +65,15 @@ function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, 
       {query.length > 0 && query.length < 3 && <p className="fieldHelp">Введите не меньше трёх букв для поиска.</p>}
       <div className="movementChoiceList" role="listbox" aria-label="Выберите упражнение">{filteredMovements.length ? filteredMovements.map(item => <button type="button" role="option" key={item.id} className={form.movement_id === item.id ? 'selected' : ''} aria-selected={form.movement_id === item.id} onClick={() => { setForm({ ...form, movement_id: item.id, name: item.name, duration_minutes: item.kind === 'strength' ? null : form.duration_minutes ?? 20 }); setPickerOpen(false) }}><strong>{item.name}</strong><small>{item.kind === 'strength' ? item.primary_group : movementKinds[item.kind]}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></button>) : <p className="fieldHelp">Упражнения не найдены. Добавьте движение в «Списке упражнений».</p>}</div>
     </div>}
-    {selectedMovement?.kind !== 'strength' && selectedMovement ? <div className="fieldGrid">{numberField('duration_minutes', 'План, минут')}{numberField('position', 'Порядок')}</div> : <><div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}{numberField('position', 'Порядок')}</div><div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}</div><p className="fieldHelp">ПДО назначается фазой недели и правилом возвращения. Целевое значение показано в тренировке; фактический ПДО записывается после подхода.</p></>}
+    {selectedMovement?.kind !== 'strength' && selectedMovement ? <div className="fieldGrid">{numberField('duration_minutes', 'План, минут')}</div> : <><div className="fieldGrid">{numberField('medium_weight', 'Стартовый вес, кг', '0.5')}{numberField('weight_step', 'Шаг веса, кг', '0.5')}{numberField('sets_count', 'Базовых подходов')}</div><div className="fieldGrid">{numberField('rep_min', 'Повторы от')}{numberField('rep_max', 'Повторы до')}</div><p className="fieldHelp">ПДО назначается фазой недели и правилом возвращения. Целевое значение показано в тренировке; фактический ПДО записывается после подхода.</p></>}
     <button className="primaryButton" type="submit" disabled={!form.movement_id}>{exercise ? 'Сохранить настройки' : 'Сохранить упражнение'}</button>
   </fieldset></form>
 }
 
-export function ProgramView({ templates, run, canEditCatalog, onTemplateDeleted }: {
+export function ProgramView({ templates, run, canEditCatalog, onTemplateDeleted, onTemplateReordered }: {
   templates: Template[];
-  run: (action: () => Promise<unknown>) => Promise<void>; canEditCatalog: boolean; onTemplateDeleted?: (id: string) => void
+  run: (action: () => Promise<unknown>) => Promise<void>; canEditCatalog: boolean;
+  onTemplateDeleted?: (id: string) => void; onTemplateReordered?: (template: Template) => void
 }) {
   const templateSubmission = useSubmission()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -96,6 +98,16 @@ export function ProgramView({ templates, run, canEditCatalog, onTemplateDeleted 
   const [cycleStart, setCycleStart] = useState('')
   const [cycleSlots, setCycleSlots] = useState<CycleConfig['slots']>([])
   const [cycleBusy, setCycleBusy] = useState(false)
+  const [orderOverride, setOrderOverride] = useState<{ templateId: string; ids: string[] } | null>(null)
+  const [reorderBusy, setReorderBusy] = useState(false)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const dragCleanup = useRef<(() => void) | null>(null)
+  useEffect(() => () => dragCleanup.current?.(), [])
+  useEffect(() => {
+    if (!orderOverride) return
+    const current = templates.find(item => item.id === orderOverride.templateId)?.exercises.map(item => item.id)
+    if (current?.join('|') === orderOverride.ids.join('|')) setOrderOverride(null)
+  }, [templates, orderOverride])
   useEffect(() => {
     let active = true
     api.programCycle().then(config => {
@@ -163,11 +175,87 @@ export function ProgramView({ templates, run, canEditCatalog, onTemplateDeleted 
     setReplacementEditor(null)
   })
 
+  const orderedExercises = selected ? (() => {
+    if (orderOverride?.templateId !== selected.id) return selected.exercises
+    const byId = new Map(selected.exercises.map(item => [item.id, item]))
+    return orderOverride.ids.map(id => byId.get(id)).filter((item): item is Exercise => Boolean(item))
+  })() : []
+  const persistOrder = async (ids: string[]) => {
+    if (!selected || reorderBusy) return
+    const templateId = selected.id
+    setOrderOverride({ templateId, ids })
+    setReorderBusy(true)
+    await run(async () => {
+      try { onTemplateReordered?.(await api.reorderExercises(templateId, ids)) }
+      catch (err) { setOrderOverride(null); throw err }
+      finally { setReorderBusy(false) }
+    })
+  }
+  const startDrag = (exerciseId: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!selected || reorderBusy || (event.pointerType === 'mouse' && event.button !== 0)) return
+    event.preventDefault()
+    dragCleanup.current?.()
+    const templateId = selected.id
+    const pointerId = event.pointerId
+    const original = orderedExercises.map(item => item.id)
+    let current = original
+    setDraggingId(exerciseId)
+    const onMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return
+      moveEvent.preventDefault()
+      if (moveEvent.clientY < 80) window.scrollBy(0, -12)
+      else if (moveEvent.clientY > window.innerHeight - 90) window.scrollBy(0, 12)
+      const otherRows = Array.from(document.querySelectorAll<HTMLElement>('[data-exercise-row]'))
+        .filter(row => row.dataset.templateId === templateId && row.dataset.exerciseId !== exerciseId)
+      let destination = otherRows.findIndex(row => {
+        const rect = row.querySelector('.programExercise')?.getBoundingClientRect()
+        return rect && moveEvent.clientY < rect.top + rect.height / 2
+      })
+      if (destination < 0) destination = otherRows.length
+      const next = current.filter(id => id !== exerciseId)
+      next.splice(destination, 0, exerciseId)
+      if (next.join('|') !== current.join('|')) {
+        current = next
+        setOrderOverride({ templateId, ids: next })
+      }
+    }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+      dragCleanup.current = null
+      setDraggingId(null)
+    }
+    const onUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== pointerId) return
+      cleanup()
+      if (current.join('|') !== original.join('|')) void persistOrder(current)
+      else setOrderOverride(null)
+    }
+    const onCancel = (cancelEvent: PointerEvent) => {
+      if (cancelEvent.pointerId !== pointerId) return
+      cleanup()
+      setOrderOverride(null)
+    }
+    dragCleanup.current = cleanup
+    window.addEventListener('pointermove', onMove, { passive: false })
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+  }
+  const keyboardMove = (exerciseId: string, direction: -1 | 1) => {
+    const ids = orderedExercises.map(item => item.id)
+    const index = ids.indexOf(exerciseId)
+    const destination = index + direction
+    if (reorderBusy || index < 0 || destination < 0 || destination >= ids.length) return
+    ;[ids[index], ids[destination]] = [ids[destination], ids[index]]
+    void persistOrder(ids)
+  }
+
   const selectedPanel = selected && !editingTemplate && <section className="programSessionBlock" aria-label={`Настройка тренировки ${selected.name}`}>
       <div className="programCard"><div className="programCardTop"><span>{cycleConfig?.length_days ? `Дни цикла: ${selected.cycle_days.join(', ') || 'не назначены'}` : weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
       <div className="sectionHead"><h2>Упражнения</h2><span>{selected.exercises.length}</span></div>
-      {selected.exercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; const replacing = replacementEditor === exercise.id; return <div className="programExerciseItem" key={exercise.id}>
-        <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement && movement.kind !== 'strength' ? `${movementKinds[movement.kind]} · ${exercise.duration_minutes ?? '—'} мин` : `${movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · ${exercise.sets_count} подхода · ${exercise.rep_min}–${exercise.rep_max} · ${formatWeight(exercise.medium_weight)} кг`}</small></div><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
+      {orderedExercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; const replacing = replacementEditor === exercise.id; return <div className={`programExerciseItem ${draggingId === exercise.id ? 'isDragging' : ''}`} data-exercise-row data-template-id={selected.id} data-exercise-id={exercise.id} key={exercise.id}>
+        <div className="programExercise"><button type="button" className="exerciseDragHandle" aria-label={`Переместить ${exercise.name}. Зажмите и перетащите; с клавиатуры используйте стрелки вверх и вниз`} title="Зажмите и перетащите" disabled={reorderBusy} onPointerDown={event => startDrag(exercise.id, event)} onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); keyboardMove(exercise.id, event.key === 'ArrowUp' ? -1 : 1) } }}><IconGripVertical size={20} stroke={1.8} aria-hidden="true" /></button><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement && movement.kind !== 'strength' ? `${movementKinds[movement.kind]} · ${exercise.duration_minutes ?? '—'} мин` : `${movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · ${exercise.sets_count} подхода · ${exercise.rep_min}–${exercise.rep_max} · ${formatWeight(exercise.medium_weight)} кг`}</small></div><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
         <div className="programActions"><button type="button" onClick={() => { setReplacementEditor(null); setExerciseEditor(expanded ? null : exercise.id) }} disabled={!catalogLoadedAt} aria-expanded={expanded} aria-controls={`exercise-editor-${exercise.id}`}>Изменить настройки</button><button type="button" onClick={() => { setExerciseEditor(null); setReplacementEditor(replacing ? null : exercise.id) }} disabled={!catalogLoadedAt} aria-expanded={replacing} aria-controls={`exercise-replacement-${exercise.id}`}>Заменить упражнение</button></div>
         {expanded && <div className="programInlineEditor" id={`exercise-editor-${exercise.id}`}><ExerciseEditor template={selected} movements={movements} detailGroups={detailGroups} exercise={exercise} onClose={() => setExerciseEditor(null)} run={runAndCollapse} /></div>}
         {replacing && <div className="programInlineEditor" id={`exercise-replacement-${exercise.id}`}><ExerciseReplacement exercise={exercise} movements={movements} detailGroups={detailGroups} onClose={() => setReplacementEditor(null)} onReplaced={result => setReplacementNotice(`В программе теперь «${result.exercise.name}». ${result.history_mode === 'resume' ? 'Прежняя база результатов продолжена.' : 'Начата новая база результатов.'} Замена действует со следующей новой тренировки. Уже созданные занятия сохранены (${result.preserved_sessions_count}).`)} run={runAndCollapse} /></div>}

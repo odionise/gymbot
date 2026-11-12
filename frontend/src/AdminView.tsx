@@ -55,7 +55,7 @@ export function AdminView() {
       <h1>{selected.username ? `@${selected.username}` : selected.display_name || `ID ${selected.telegram_id}`}</h1>
       {selected.display_name && <p className="intro">{selected.display_name}</p>}
       {error && <p className="adminError" role="alert">{error}</p>}
-      <ProgramView templates={templates} run={run} canEditCatalog onTemplateDeleted={id => setTemplates(items => items.filter(item => item.id !== id))} />
+      <ProgramView templates={templates} run={run} canEditCatalog onTemplateDeleted={id => setTemplates(items => items.filter(item => item.id !== id))} onTemplateReordered={template => setTemplates(items => items.map(item => item.id === template.id ? template : item))} />
     </> : <>
       <span className="adminEyebrow">Управление программами</span>
       <h1>Пользователи</h1>

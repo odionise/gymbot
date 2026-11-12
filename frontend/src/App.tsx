@@ -150,13 +150,14 @@ function ProgramLoadError({ cachedAt, onRetry }: { cachedAt: string | null; onRe
   </div>
 }
 
-export function ProgramPanel({ templates, loadedAt, error, onRetry, run, canEditCatalog, onTemplateDeleted }: {
+export function ProgramPanel({ templates, loadedAt, error, onRetry, run, canEditCatalog, onTemplateDeleted, onTemplateReordered }: {
   templates: Template[]; loadedAt: string | null; error: string; onRetry: () => void;
-  run: (action: () => Promise<unknown>) => Promise<void>; canEditCatalog: boolean; onTemplateDeleted?: (id: string) => void
+  run: (action: () => Promise<unknown>) => Promise<void>; canEditCatalog: boolean;
+  onTemplateDeleted?: (id: string) => void; onTemplateReordered?: (template: Template) => void
 }) {
   return <>
     {error && <ProgramLoadError cachedAt={loadedAt} onRetry={onRetry} />}
-    {loadedAt ? <ProgramView templates={templates} run={run} canEditCatalog={canEditCatalog} onTemplateDeleted={onTemplateDeleted} /> : !error && <div className="emptyCard">Загружаем программу…</div>}
+    {loadedAt ? <ProgramView templates={templates} run={run} canEditCatalog={canEditCatalog} onTemplateDeleted={onTemplateDeleted} onTemplateReordered={onTemplateReordered} /> : !error && <div className="emptyCard">Загружаем программу…</div>}
   </>
 }
 
@@ -321,7 +322,7 @@ export default function App() {
         )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу</button>}
         {me && !me.has_started_bot && <p className="hint">Чтобы получать сообщения, сначала отправьте боту команду /start.</p>}
         <HomeFaq />
-      </> : tab === 'program' ? <><div className="profileShortcut"><span>{me?.display_name}{me?.age !== null ? ` · ${me?.age} лет` : ''}</span><button type="button" className="textButton" onClick={() => setEditingProfile(!editingProfile)}>{editingProfile ? 'Свернуть анкету' : 'Изменить анкету'}</button></div>{editingProfile && me && <ProfileForm profile={me} onSaved={profile => { setMe(profile); setEditingProfile(false) }} onClose={() => setEditingProfile(false)} />}<ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} canEditCatalog={me.is_admin} onTemplateDeleted={id => { setTemplates(items => items.filter(item => item.id !== id)); setSessions(items => items.filter(item => item.template_id !== id)) }} /></>
+      </> : tab === 'program' ? <><div className="profileShortcut"><span>{me?.display_name}{me?.age !== null ? ` · ${me?.age} лет` : ''}</span><button type="button" className="textButton" onClick={() => setEditingProfile(!editingProfile)}>{editingProfile ? 'Свернуть анкету' : 'Изменить анкету'}</button></div>{editingProfile && me && <ProfileForm profile={me} onSaved={profile => { setMe(profile); setEditingProfile(false) }} onClose={() => setEditingProfile(false)} />}<ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} canEditCatalog={me.is_admin} onTemplateDeleted={id => { setTemplates(items => items.filter(item => item.id !== id)); setSessions(items => items.filter(item => item.template_id !== id)) }} onTemplateReordered={template => setTemplates(items => items.map(item => item.id === template.id ? template : item))} /></>
         : tab === 'progress' ? <ProgressView />
           : tab === 'admin' && me.is_admin ? <AdminView /> : <HistoryView />}
     </main>

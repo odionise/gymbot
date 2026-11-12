@@ -26,7 +26,7 @@ from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS, VOLUME_TARGET_GROUPS
 from .planning import cycle_complete, cycle_schedule, due_cycle_slot, get_or_create_session, is_reentry, monday, movement_for, next_cycle_start, planned_counts, recommendation_context, resolve_week, vacation_override
 from .preview import preview_session
 from .recommendations import recommendation_dict, record_manual_target, save_recommendation
-from .schemas import CycleConfigIn, DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, ProfileIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
+from .schemas import CycleConfigIn, DurationIn, ExerciseIn, ExerciseOrderIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, ProfileIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
 
@@ -424,6 +424,30 @@ def delete_template(template_id: str, user: User = Depends(program_user), db: Se
     item.active = False
     db.commit()
     return {"ok": True}
+
+
+@app.put("/api/templates/{template_id}/exercise-order")
+def reorder_exercises(template_id: str, data: ExerciseOrderIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
+    # Lock the owner before the template, matching calendar and workout writes.
+    locked_row(db, User, User.telegram_id == user.telegram_id)
+    template = locked_row(db, WorkoutTemplate,
+        WorkoutTemplate.id == template_id, WorkoutTemplate.user_id == user.telegram_id,
+        WorkoutTemplate.active.is_(True))
+    if template is None:
+        raise HTTPException(404, "Тренировка не найдена")
+    exercises = list(db.scalars(select(Exercise).where(
+        Exercise.template_id == template_id, Exercise.active.is_(True),
+    ).order_by(Exercise.id).with_for_update().execution_options(populate_existing=True)))
+    if len(data.exercise_ids) != len(set(data.exercise_ids)):
+        raise HTTPException(422, "Упражнение указано несколько раз")
+    if set(data.exercise_ids) != {item.id for item in exercises}:
+        raise HTTPException(409, "Состав тренировки изменился. Обновите программу и повторите перестановку.")
+    by_id = {item.id: item for item in exercises}
+    for position, exercise_id in enumerate(data.exercise_ids):
+        by_id[exercise_id].position = position
+    db.commit()
+    db.expire(template, ["exercises"])
+    return template_dict(template)
 
 
 @app.post("/api/templates/{template_id}/exercises")

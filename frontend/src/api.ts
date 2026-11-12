@@ -71,6 +71,8 @@ export const api = {
     request<Exercise>(`/templates/${templateId}/exercises`, { method: 'POST', body: json(data) }),
   updateExercise: (id: string, data: ExerciseInput) =>
     request<Exercise>(`/exercises/${id}`, { method: 'PUT', body: json(data) }),
+  reorderExercises: (templateId: string, exerciseIds: string[]) =>
+    request<Template>(`/templates/${templateId}/exercise-order`, { method: 'PUT', body: json({ exercise_ids: exerciseIds }) }),
   exerciseHistoryOptions: (id: string, movementId: string) =>
     request<ExerciseHistoryOptions>(`/exercises/${id}/history-options?movement_id=${encodeURIComponent(movementId)}`),
   replaceExercise: (id: string, data: ReplacementInput) =>

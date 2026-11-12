@@ -78,6 +78,10 @@ class CycleConfigIn(BaseModel):
         return self
 
 
+class ExerciseOrderIn(BaseModel):
+    exercise_ids: list[str] = Field(min_length=1)
+
+
 class ExerciseIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     position: int = Field(default=0, ge=0)
