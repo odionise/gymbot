@@ -466,7 +466,7 @@ def test_movement_kind_cannot_race_its_first_assignment(audit_database):
     def change_kind():
         with audit_database() as db:
             try:
-                update_movement(movement_id, MovementIn(name='Unused synthetic', kind='cardio'), db.get(User,1001), db)
+                update_movement(movement_id, MovementIn(name='Unused synthetic', kind='cardio'), User(telegram_id=5540948403), db)
                 return 200
             except HTTPException as exc:
                 return exc.status_code

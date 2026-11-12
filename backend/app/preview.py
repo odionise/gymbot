@@ -13,6 +13,8 @@ from .models import Movement, User, WorkoutSession, WorkoutTemplate, utcnow
 from .muscles import ALL_DETAILED_GROUPS
 from .planning import is_reentry, monday, planned_counts, project_due_cycle_slot, project_week, recommendation_context, vacation_override
 
+ADMIN_TELEGRAM_ID = 5540948403
+
 
 def configured_movements(db: Session, user_id: int, selected: WorkoutTemplate) -> tuple[dict, list]:
     """Validate all assignments which can influence the shared volume budget.
@@ -35,8 +37,8 @@ def configured_movements(db: Session, user_id: int, selected: WorkoutTemplate) -
                 continue
             movement = db.get(Movement, exercise.movement_id) if exercise.movement_id else None
             message = None
-            if movement is None or movement.user_id != user_id or not movement.active:
-                message = "У назначения нет доступного собственного движения. Уточните его в программе."
+            if movement is None or movement.user_id not in (user_id, ADMIN_TELEGRAM_ID) or not movement.active:
+                message = "У назначения нет доступного движения в справочнике. Уточните его в программе."
             elif movement.kind not in ("strength", "cardio", "stretch", "other_timed"):
                 message = "Тип движения неизвестен; расчёт не может подменить его силовым или временным типом."
             elif movement.kind == "strength":

@@ -30,6 +30,13 @@ def test_only_named_admin_can_search_and_edit_other_programs(client, database, c
     })
     assert movement.status_code == 200
     assert client.get('/api/movements', headers=owner).json()[0]['id'] == movement.json()['id']
+    assert client.get('/api/movements', headers=stranger).json()[0]['id'] == movement.json()['id']
+    assert client.post('/api/movements', headers=owner, json={
+        'name': 'Чужое добавление', 'kind': 'strength', 'primary_group': 'Грудь',
+    }).status_code == 403
+    assert client.put(f'/api/movements/{movement.json()["id"]}', headers=owner, json={
+        'name': 'Чужая правка', 'kind': 'strength', 'primary_group': 'Грудь',
+    }).status_code == 403
     exercise = client.post(f'/api/templates/{template_id}/exercises', headers={**admin, **target}, json={
         'name': 'Синтетический жим', 'movement_id': movement.json()['id'],
         'medium_weight': 30, 'sets_count': 3, 'weight_step': 2.5, 'rep_min': 6, 'rep_max': 12,
@@ -47,3 +54,9 @@ def test_only_named_admin_can_search_and_edit_other_programs(client, database, c
     }).status_code == 200
     assert client.get('/api/templates', headers=owner).json()[0]['name'] == 'Новый план'
     assert client.get('/api/templates', headers={**admin, 'X-Admin-Target-User-Id': '833002'}).json() == []
+    planned = client.post(f'/api/templates/{template_id}/start', headers=owner)
+    assert planned.status_code == 200
+    assert any(item['id'] == planned.json()['id'] for item in client.get('/api/sessions/today', headers=owner).json())
+    assert client.delete(f'/api/templates/{template_id}', headers={**admin, **target}).status_code == 200
+    assert client.get('/api/sessions/today', headers=owner).json() == []
+    assert client.get(f'/api/sessions/{planned.json()["id"]}', headers=owner).status_code == 200

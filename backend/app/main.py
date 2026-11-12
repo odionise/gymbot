@@ -88,7 +88,7 @@ def owned_exercise(db: Session, user: User, exercise_id: str) -> Exercise:
 
 def owned_movement(db: Session, user: User, movement_id: str) -> Movement:
     item = db.get(Movement, movement_id)
-    if not item or item.user_id != user.telegram_id or not item.active:
+    if not item or item.user_id not in (user.telegram_id, ADMIN_TELEGRAM_ID) or not item.active:
         raise HTTPException(404, "Movement not found")
     return item
 
@@ -112,9 +112,23 @@ def current_exercise(db: Session, user: User, exercise_id: str, lock: bool = Fal
 
 
 def locked_movement(db: Session, user: User, movement_id: str) -> Movement:
+    if user.telegram_id != ADMIN_TELEGRAM_ID:
+        raise HTTPException(403, "Справочник упражнений редактирует только администратор")
+    item = locked_row(db, Movement,
+        Movement.id == movement_id, Movement.active.is_(True),
+    )
+    if item is None:
+        raise HTTPException(404, "Движение уже удалено")
+    return item
+
+
+def locked_available_movement(db: Session, user: User, movement_id: str) -> Movement:
+    """Lock a usable personal or shared catalog entry before assigning it."""
     owned_movement(db, user, movement_id)
     item = locked_row(db, Movement,
-        Movement.id == movement_id, Movement.user_id == user.telegram_id, Movement.active.is_(True),
+        Movement.id == movement_id,
+        Movement.user_id.in_((user.telegram_id, ADMIN_TELEGRAM_ID)),
+        Movement.active.is_(True),
     )
     if item is None:
         raise HTTPException(404, "Движение уже удалено")
@@ -280,17 +294,19 @@ def update_muscle_target(group: str, data: MuscleTargetIn, user: User = Depends(
 @app.get("/api/movements")
 def movements(user: User = Depends(program_user), db: Session = Depends(get_db)):
     query = select(Movement, movement_usage(Movement.id)).where(
-        Movement.user_id == user.telegram_id, Movement.active.is_(True)).order_by(Movement.name, Movement.id)
+        Movement.user_id.in_((user.telegram_id, ADMIN_TELEGRAM_ID)), Movement.active.is_(True)).order_by(Movement.name, Movement.id)
     return [movement_dict(item, used) for item, used in db.execute(query)]
 
 
 @app.post("/api/movements")
-def create_movement(data: MovementIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
+def create_movement(data: MovementIn, actor: User = Depends(current_user), db: Session = Depends(get_db)):
+    if actor.telegram_id != ADMIN_TELEGRAM_ID:
+        raise HTTPException(403, "Справочник упражнений редактирует только администратор")
     if data.is_anchor:
-        for old in db.scalars(select(Movement).where(Movement.user_id == user.telegram_id,
+        for old in db.scalars(select(Movement).where(Movement.user_id == ADMIN_TELEGRAM_ID,
                                                     Movement.primary_group == data.primary_group)):
             old.is_anchor = False
-    item = Movement(user_id=user.telegram_id, name=data.name, kind=data.kind, primary_group=data.primary_group,
+    item = Movement(user_id=ADMIN_TELEGRAM_ID, name=data.name, kind=data.kind, primary_group=data.primary_group,
                     secondary_groups=", ".join(data.secondary_groups), is_anchor=data.is_anchor)
     db.add(item)
     db.commit()
@@ -299,13 +315,15 @@ def create_movement(data: MovementIn, user: User = Depends(program_user), db: Se
 
 
 @app.put("/api/movements/{movement_id}")
-def update_movement(movement_id: str, data: MovementIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
-    item = locked_movement(db, user, movement_id)
+def update_movement(movement_id: str, data: MovementIn, actor: User = Depends(current_user), db: Session = Depends(get_db)):
+    if actor.telegram_id != ADMIN_TELEGRAM_ID:
+        raise HTTPException(403, "Справочник упражнений редактирует только администратор")
+    item = locked_movement(db, actor, movement_id)
     used = movement_is_used(db, item.id)
     if used and data.kind != item.kind:
         raise HTTPException(409, "Тип использованного движения менять нельзя. Создайте другое движение и замените упражнение в программе.")
     if data.is_anchor:
-        for old in db.scalars(select(Movement).where(Movement.user_id == user.telegram_id,
+        for old in db.scalars(select(Movement).where(Movement.user_id == item.user_id,
                                                     Movement.primary_group == data.primary_group,
                                                     Movement.id != movement_id)):
             old.is_anchor = False
@@ -330,8 +348,21 @@ def program_cycle(user: User = Depends(program_user), db: Session = Depends(get_
     slots = sorted(({"day": day, "template_id": template.id}
                     for template in templates for day in json.loads(template.cycle_days_json or "[]")),
                    key=lambda item: (item["day"], item["template_id"]))
+    current = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+    ).order_by(TrainingWeek.week_start.desc()))
+    status = None
+    if current:
+        completed = {(item.cycle_day, item.template_id) for item in db.scalars(select(WorkoutSession).where(
+            WorkoutSession.user_id == user.telegram_id, WorkoutSession.week_id == current.id,
+            WorkoutSession.status == "completed"))}
+        schedule = cycle_schedule(current)
+        status = {"start_date": current.week_start.isoformat(), "phase": current.phase_type,
+                  "number": current.week_number, "completed_slots": sum(
+                      (slot["day"], slot["template_id"]) in completed for slot in schedule),
+                  "total_slots": len(schedule)}
     return {"length_days": user.cycle_days, "start_date": user.cycle_anchor,
-            "slots": slots}
+            "slots": slots, "current_cycle": status}
 
 
 @app.put("/api/program/cycle")
@@ -406,7 +437,7 @@ def create_exercise(template_id: str, data: ExerciseIn, user: User = Depends(pro
         raise HTTPException(404, "Тренировочный день уже удалён")
     if not data.movement_id:
         raise HTTPException(422, "Choose a movement and its muscle groups")
-    movement = locked_movement(db, user, data.movement_id)
+    movement = locked_available_movement(db, user, data.movement_id)
     if movement.kind != "strength" and data.duration_minutes is None:
         raise HTTPException(422, "Укажите длительность в минутах")
     data.name = movement.name
@@ -423,7 +454,7 @@ def update_exercise(exercise_id: str, data: ExerciseIn, user: User = Depends(pro
     item = current_exercise(db, user, exercise_id, lock=True)
     if data.movement_id is not None and data.movement_id != item.movement_id:
         raise HTTPException(409, "Для другого движения используйте действие «Заменить упражнение».")
-    movement = locked_movement(db, user, data.movement_id or item.movement_id)
+    movement = locked_available_movement(db, user, data.movement_id or item.movement_id)
     if movement.kind != "strength" and data.duration_minutes is None:
         raise HTTPException(422, "Укажите длительность в минутах")
     data.name = movement.name
@@ -460,7 +491,7 @@ def history_options(exercise_id: str, movement_id: str, user: User = Depends(pro
 @app.post("/api/exercises/{exercise_id}/replace")
 def replace_exercise(exercise_id: str, data: ReplacementIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = current_exercise(db, user, exercise_id, lock=True)
-    movement = locked_movement(db, user, data.movement_id)
+    movement = locked_available_movement(db, user, data.movement_id)
     settings = data.settings.model_dump(exclude_none=True)
     strength_fields = {"sets_count", "medium_weight", "weight_step", "rep_min", "rep_max"}
     if movement.kind == "strength":
@@ -546,9 +577,10 @@ def today_sessions(user: User = Depends(current_user), db: Session = Depends(get
         )).all()
         for template in due:
             get_or_create_session(db, template, local_date)
-    sessions = db.scalars(select(WorkoutSession).where(
+    sessions = db.scalars(select(WorkoutSession).join(WorkoutTemplate, WorkoutSession.template_id == WorkoutTemplate.id).where(
         WorkoutSession.user_id == user.telegram_id,
         WorkoutSession.status != "completed",
+        WorkoutTemplate.active.is_(True),
     ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
               selectinload(WorkoutSession.week)).order_by(WorkoutSession.scheduled_date, WorkoutSession.id)).all()
     return [session_dict(item, db.get(WorkoutTemplate, item.template_id)) for item in sessions]
@@ -818,8 +850,13 @@ def next_period_start(db: Session, user: User) -> date:
 def next_week(user: User = Depends(current_user), db: Session = Depends(get_db)):
     start = next_period_start(db, user)
     if user.cycle_days is not None:
+        latest = db.scalar(select(TrainingWeek).where(
+            TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+        ).order_by(TrainingWeek.week_start.desc()))
+        waiting = bool(latest and not cycle_complete(db, latest, datetime.now(ZoneInfo(user.timezone)).date()))
         return {"week_start": start.isoformat(), "kind": user.next_cycle_override,
-                "unit": "cycle", "length_days": user.cycle_days}
+                "unit": "cycle", "length_days": user.cycle_days,
+                "waiting_for_completion": waiting}
     override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
                                                     WeekOverride.week_start == start))
     return {"week_start": start.isoformat(), "kind": override.kind if override else None}

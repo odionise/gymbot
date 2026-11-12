@@ -69,9 +69,9 @@ function ExerciseEditor({ template, exercise, movements, detailGroups, onClose, 
   </fieldset></form>
 }
 
-export function ProgramView({ templates, run }: {
+export function ProgramView({ templates, run, canEditCatalog, onTemplateDeleted }: {
   templates: Template[];
-  run: (action: () => Promise<unknown>) => Promise<void>
+  run: (action: () => Promise<unknown>) => Promise<void>; canEditCatalog: boolean; onTemplateDeleted?: (id: string) => void
 }) {
   const templateSubmission = useSubmission()
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -148,7 +148,8 @@ export function ProgramView({ templates, run }: {
   }
   const deleteTemplate = async () => {
     if (!selected || !window.confirm(`Удалить тренировку «${selected.name}»? История сохранится.`)) return
-    await run(async () => { await api.deleteTemplate(selected.id); setSelectedId(null) })
+    const id = selected.id
+    await run(async () => { await api.deleteTemplate(id); setSelectedId(null); onTemplateDeleted?.(id) })
   }
   const deleteExercise = async (exercise: Exercise) => {
     if (!window.confirm(`Удалить «${exercise.name}» из программы? История сохранится.`)) return
@@ -181,14 +182,16 @@ export function ProgramView({ templates, run }: {
     {replacementNotice && <p className="hint" role="status">{replacementNotice}</p>}
     {catalogError && <div className="emptyCard" role="alert"><p>Не удалось загрузить справочник. {catalogError}</p>{catalogLoadedAt && <p>Показана версия от {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'long' }).format(new Date(catalogLoadedAt))}.</p>}<button className="outlineButton" onClick={() => setCatalogReload(value => value + 1)}>Повторить загрузку справочника</button></div>}
     {!catalogLoadedAt && !catalogError && <p className="hint" role="status">Загружаем справочник упражнений…</p>}
-    {templates.length > 0 && <form className="editorPanel cycleEditor" onSubmit={saveCycle}>
+    <form className="editorPanel cycleEditor" onSubmit={saveCycle}>
       <div className="editorTitle"><h2>Тренировочный цикл</h2></div>
-      <p className="intro">Три полностью завершённых цикла накопления, затем один лёгкий цикл. Пропуск или перенос не переключает фазу.</p>
+      <p className="intro">{cycleConfig?.length_days ? `Сейчас: цикл ${cycleConfig.length_days} дней. Дни занятий указаны ниже.` : 'Сейчас действует расписание по дням недели. Задайте цикл и распределите по нему тренировки.'} После трёх полностью завершённых циклов накопления следует лёгкий цикл той же длины. Пропуск или перенос задерживает следующий цикл.</p>
+      {cycleConfig?.current_cycle && <div className="cycleStatus" role="status"><strong>{cycleConfig.current_cycle.phase === 'deload' ? 'Лёгкий цикл' : cycleConfig.current_cycle.phase === 'vacation' ? 'Отпуск' : `Цикл накопления ${cycleConfig.current_cycle.number} из 3`}</strong><span>Начало {new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${cycleConfig.current_cycle.start_date}T12:00:00Z`))} · завершено занятий {cycleConfig.current_cycle.completed_slots} из {cycleConfig.current_cycle.total_slots}</span></div>}
+      {!templates.length && <p className="fieldHelp">Сначала создайте тренировку и добавьте в неё упражнение. Затем назначьте её на дни цикла.</p>}
       <div className="fieldGrid"><label className="field"><span>Длина цикла, дней</span><input type="number" min={2} max={30} value={cycleDays} onChange={event => setCycleDays(Number(event.target.value))} required /></label><label className="field"><span>Начало первого или следующего цикла</span><input type="date" value={cycleStart} onChange={event => setCycleStart(event.target.value)} required /></label></div>
       <div className="cycleSlots">{cycleSlots.map((slot, index) => <div className="cycleSlot" key={index}><label className="field"><span>День</span><input type="number" min={1} max={cycleDays} value={slot.day} onChange={event => setCycleSlots(items => items.map((item, i) => i === index ? { ...item, day: Number(event.target.value) } : item))} /></label><ChoiceDropdown label="Тренировка" value={slot.template_id} options={templates.map(template => ({ value: template.id, label: template.name }))} onChange={value => setCycleSlots(items => items.map((item, i) => i === index ? { ...item, template_id: value } : item))} /><button type="button" className="textButton" onClick={() => setCycleSlots(items => items.filter((_, i) => i !== index))} aria-label={`Удалить занятие ${index + 1}`}>×</button></div>)}</div>
-      <button type="button" className="outlineButton" disabled={cycleSlots.length >= 30} onClick={() => setCycleSlots(items => [...items, { day: Math.min(cycleDays, (items.at(-1)?.day ?? 0) + 1), template_id: templates[0].id }])}>+ Занятие в цикле</button>
-      <button className="primaryButton" type="submit" disabled={cycleBusy || cycleSlots.length === 0}>{cycleBusy ? 'Сохраняем…' : 'Сохранить цикл'}</button>
-    </form>}
+      <button type="button" className="outlineButton" disabled={!templates.length || cycleSlots.length >= 30} onClick={() => setCycleSlots(items => [...items, { day: Math.min(cycleDays, (items.at(-1)?.day ?? 0) + 1), template_id: templates[0].id }])}>+ Занятие в цикле</button>
+      <button className="primaryButton" type="submit" disabled={cycleBusy || cycleSlots.length === 0 || !templates.length}>{cycleBusy ? 'Сохраняем…' : 'Сохранить цикл'}</button>
+    </form>
     <div className="programPicker" aria-label="Тренировки программы">
       {templates.map(item => <Fragment key={item.id}>
         <button type="button" className={selectedId === item.id ? 'chosen' : ''} aria-expanded={selectedId === item.id} onClick={() => {
@@ -223,6 +226,6 @@ export function ProgramView({ templates, run }: {
       {cycleConfig?.length_days && <p className="intro">Дни этой тренировки назначаются в блоке «Тренировочный цикл».</p>}
       <button className="primaryButton" type="submit">Сохранить тренировку</button>
     </fieldset></form>}
-    {catalogLoadedAt && <MovementCatalog movements={movements} detailGroups={detailGroups} refreshMovements={async () => setMovements(await api.movements())} run={run} />}
+    {catalogLoadedAt && <MovementCatalog movements={movements} detailGroups={detailGroups} refreshMovements={async () => setMovements(await api.movements())} run={run} canEdit={canEditCatalog} />}
   </>
 }

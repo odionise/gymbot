@@ -165,6 +165,39 @@ html, body, #root, .appShell, .isWorkout { background: var(--paper); }
 .adminSearch .field { flex: 1; margin: 0; }
 .adminSearch .primaryButton { min-height: 48px; }
 .adminMatches button { width: 100%; min-height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 2px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: white; text-align: left; }
+
+.portalMenu { background: #202024; color: #f7f7f8; box-shadow: 0 22px 55px #000b; overscroll-behavior: contain; }
+.portalMenu button { color: #f7f7f8; }
+.portalMenu button:hover { background: #36363c; }
+.workoutActions { display: flex; align-items: flex-start; gap: 9px; flex-wrap: wrap; margin: 22px 0 26px; }
+.workoutActionChip, .reschedulePanel > summary { display: inline-flex; align-items: center; min-height: 43px; padding: 10px 16px; border: 0; border-radius: 999px; background: #29292f; color: #f5f5f7; font: inherit; font-size: .82rem; font-weight: 650; cursor: pointer; }
+.reschedulePanel { position: relative; }
+.reschedulePanel > summary { list-style: none; }
+.reschedulePanel > summary::-webkit-details-marker { display: none; }
+.rescheduleContent { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; padding: 14px 0 0; }
+.rescheduleContent .field { min-width: 180px; margin: 0; }
+.rescheduleContent .outlineButton { min-height: 48px; }
+.setRow, .isWorkout .setRow { display: grid; grid-template-columns: 24px repeat(2,minmax(0,1fr)); gap: 8px; align-items: end; }
+.setRow .setNumber { grid-column: 1; grid-row: 1; align-self: center; }
+.setRow .setField:nth-child(2) { grid-column: 2; grid-row: 1; }
+.setRow .setField:nth-child(3) { grid-column: 3; grid-row: 1; }
+.setRow .setField:nth-child(4) { grid-column: 2; grid-row: 2; }
+.setRow .saveSet { width: 100%; min-height: 51px; grid-column: 3; grid-row: 2; }
+.setRow .savedSetActions { grid-column: 2 / 4; grid-row: 3; min-height: 34px; justify-content: flex-start; }
+.setRow .savedSetSummary { grid-column: 2 / 4; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 50px; padding: 9px 12px; border: 0; border-radius: 14px; background: #25252a; color: #f4f4f6; text-align: left; font: inherit; font-size: .83rem; }
+.savedSetSummary > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.savedSetSummary .savedSetMarker { font-size: .72rem; }
+.savedSetSummary:disabled { cursor: wait; }
+.setRow.isCompact { min-height: 62px; }
+@media (max-width: 540px) {
+  .setRow .setField:nth-child(2) { grid-column: 2; grid-row: 1; }
+  .setRow .setField:nth-child(3) { grid-column: 3; grid-row: 1; }
+  .setRow .setField:nth-child(4) { grid-column: 2; grid-row: 2; }
+  .setRow .saveSet { grid-column: 3; grid-row: 2; }
+  .setRow .savedSetActions { grid-column: 2 / 4; grid-row: 3; }
+  .workoutActions { gap: 8px; }
+  .reschedulePanel { flex: 1 1 auto; }
+}
 .adminMatches strong, .adminMatches small { display: block; }
 .adminMatches small { margin-top: 4px; color: #a3a3aa; }
 .adminMatches button > span:last-child { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; background: #29292e; }

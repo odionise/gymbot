@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.analytics import progress_for_user
 from app.db import Base
 from app.main import (
-    create_exercise, create_movement, create_template, history_options,
+    create_exercise, create_template, history_options,
     replace_exercise, reschedule, save_set, session_detail,
     update_exercise, update_movement,
 )
@@ -21,7 +21,7 @@ from app.models import Exercise, User, WorkoutTemplate
 from app.planning import get_or_create_session
 from app.schemas import ExerciseIn, MovementIn, ReplacementIn, RescheduleIn, ResultIn, TemplateIn
 from app.serializers import exercise_dict
-from test_history import START, finish, program, replace
+from test_history import START, create_legacy_movement as create_movement, finish, program, replace
 
 
 def on_day(clock, day):
@@ -175,10 +175,10 @@ def test_used_catalog_type_and_settings_endpoint_cannot_bypass_replacement(datab
             update_exercise(exercise_id, settings(exercise, movement_id=different["id"]), user, db)
         assert changed.value.status_code == 409
         with pytest.raises(HTTPException) as changed_type:
-            update_movement(movement_a, MovementIn(name="Движение A", kind="cardio"), user, db)
+            update_movement(movement_a, MovementIn(name="Движение A", kind="cardio"), User(telegram_id=5540948403), db)
         assert changed_type.value.status_code == 409
         unused = create_movement(MovementIn(name="Не использовано", primary_group="Грудь"), user, db)
-        assert update_movement(unused["id"], MovementIn(name="Теперь кардио", kind="cardio"), user, db)["kind"] == "cardio"
+        assert update_movement(unused["id"], MovementIn(name="Теперь кардио", kind="cardio"), User(telegram_id=5540948403), db)["kind"] == "cardio"
         assert db.get(Exercise, exercise_id).movement_id == movement_a
 
 

@@ -8,11 +8,12 @@ from sqlalchemy.orm import Session
 from app.analytics import progress_for_user
 from app.bot import format_plan
 from app.db import make_engine
-from app.main import change_sets_count, clear_next_week, complete_session, create_exercise, create_movement, create_template, manual_deload, reschedule, save_duration, save_set, set_next_week, update_muscle_target, update_recovery
+from app.main import change_sets_count, clear_next_week, complete_session, create_exercise, create_template, manual_deload, reschedule, save_duration, save_set, set_next_week, update_muscle_target, update_recovery
 from app.migrations import migrate
 from app.models import Exercise, Movement, SessionExercise, SetResult, TrainingWeek, User, WorkoutSession, WorkoutTemplate, utcnow
 from app.planning import get_or_create_session, next_set_suggestion, resolve_week
 from app.schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, RecoveryIn, RescheduleIn, ResultIn, SetsCountIn, TemplateIn
+from test_history import create_legacy_movement as create_movement
 
 
 def test_timed_exercise_recording_excludes_strength_progress(database):

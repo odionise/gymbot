@@ -11,42 +11,48 @@ const MutationContext = createContext<Mutate>(action => action())
 function SetRow({ item, index, onChange, onError }: {
   item: SessionExercise; index: number; onChange: (value: WorkoutSession) => void; onError: (value: string) => void
 }) {
-  const saved = item.results.find(result => result.set_index === index)
+  const [optimisticState, setOptimisticState] = useState<'saving' | 'undoing' | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const storedResult = item.results.find(result => result.set_index === index)
+  const saved = optimisticState === 'undoing' ? undefined : storedResult
   const suggestion = item.weight_step !== null && item.next_set?.set_index === index ? item.next_set : null
   const [weight, setWeight] = useState(String(saved?.weight ?? suggestion?.weight ?? item.target_weight))
   const [reps, setReps] = useState(String(saved?.reps ?? suggestion?.reps ?? item.target_reps))
-  const [rir, setRir] = useState(saved?.rir_reported == null ? '' : String(saved.rir_reported))
+  const [rir, setRir] = useState(String(saved?.rir_reported ?? (index > 0 ? item.target_rir ?? '' : '')))
   const [busy, setBusy] = useState(false)
   const mutate = useContext(MutationContext)
-  const dirty = useRef({ weight: false, reps: false })
+  const dirty = useRef({ weight: false, reps: false, rir: false })
   useEffect(() => {
     // A preceding saved set can change the suggestion while this row contains
     // a manual draft. Only untouched inputs follow the new suggestion.
     if (!dirty.current.weight) setWeight(String(saved?.weight ?? suggestion?.weight ?? item.target_weight))
     if (!dirty.current.reps) setReps(String(saved?.reps ?? suggestion?.reps ?? item.target_reps))
   }, [saved?.weight, saved?.reps, suggestion?.weight, suggestion?.reps, item.target_weight, item.target_reps])
-  useEffect(() => { setRir(saved?.rir_reported == null ? '' : String(saved.rir_reported)) }, [saved?.rir_reported])
+  useEffect(() => { if (!dirty.current.rir) setRir(String(storedResult?.rir_reported ?? (index > 0 ? item.target_rir ?? '' : ''))) }, [storedResult?.rir_reported, item.target_rir, index])
   const save = async () => {
     setBusy(true)
+    setOptimisticState('saving')
+    setExpanded(false)
     try {
       const updated = await mutate(() => api.saveSet(item.id, index, Number(weight), Number(reps), rir === '' ? null : Number(rir), index > 0))
       const stored = updated.exercises.find(value => value.id === item.id)?.results.find(value => value.set_index === index)
-      dirty.current = { weight: false, reps: false }
+      dirty.current = { weight: false, reps: false, rir: false }
       if (stored) { setWeight(String(stored.weight)); setReps(String(stored.reps)); setRir(stored.rir_reported == null ? '' : String(stored.rir_reported)) }
       onChange(updated)
     }
-    catch (err) { onError((err as Error).message) }
-    finally { setBusy(false) }
+    catch (err) { setExpanded(true); onError((err as Error).message) }
+    finally { setOptimisticState(null); setBusy(false) }
   }
   const remove = async () => {
     setBusy(true)
+    setOptimisticState('undoing')
     try {
       const updated = await mutate(() => api.deleteSet(item.id, index))
-      dirty.current = { weight: false, reps: false }
+      dirty.current = { weight: false, reps: false, rir: false }
       onChange(updated)
     }
     catch (err) { onError((err as Error).message) }
-    finally { setBusy(false) }
+    finally { setOptimisticState(null); setBusy(false) }
   }
   const adjust = (value: string, delta: number, maximum: number, update: (next: string) => void) => {
     const current = Number(value)
@@ -55,12 +61,17 @@ function SetRow({ item, index, onChange, onError }: {
   }
   const valueField = (label: string, value: string, update: (next: string) => void, increment: number | null, maximum: number, mode: 'decimal' | 'numeric') =>
     <div className="setField"><span>{label}</span><div className="setValueControl"><button type="button" className="setStepButton" onClick={() => increment !== null && adjust(value, -increment, maximum, update)} disabled={busy || Boolean(saved) || increment === null || Number(value) <= 0} aria-label={`Уменьшить ${label}`} title={increment === null ? 'Шаг веса не сохранён' : `−${increment}`}>−</button><input aria-label={label} inputMode={mode} type="number" min="0" max={maximum} step={mode === 'numeric' ? '1' : 'any'} value={value} onChange={event => update(event.target.value)} disabled={busy || Boolean(saved)} /><button type="button" className="setStepButton" onClick={() => increment !== null && adjust(value, increment, maximum, update)} disabled={busy || Boolean(saved) || increment === null || Number(value) >= maximum} aria-label={`Увеличить ${label}`} title={increment === null ? 'Шаг веса не сохранён' : `+${increment}`}>+</button></div></div>
-  return <div className={`setRow ${saved ? 'isSaved' : ''}`}>
+  const compact = (Boolean(saved) || optimisticState === 'saving') && !expanded
+  return <div className={`setRow ${compact ? 'isCompact' : ''} ${saved ? 'isSaved' : ''}`}>
     <span className="setNumber">{index > 0 ? index : 'Р' + Math.abs(index)}</span>
+    {compact ? <button type="button" className="savedSetSummary" onClick={() => setExpanded(true)} aria-expanded={false} disabled={busy}>
+      <span>{weight} кг × {reps}{index > 0 ? ` · ПДО ${rir}` : ''}</span><span className="savedSetMarker" role="status">{busy ? 'Сохраняем…' : '✓ Сохранено'}</span><span aria-hidden="true">⌄</span>
+    </button> : <>
     {valueField('вес, кг', weight, value => { dirty.current.weight = true; setWeight(value) }, item.weight_step, 1000, 'decimal')}
     {valueField('повторы', reps, value => { dirty.current.reps = true; setReps(value) }, 1, 100, 'numeric')}
-    {valueField('факт ПДО', rir, setRir, 0.5, 10, 'decimal')}
-    {saved ? <div className="savedSetActions"><span className="savedSetMarker" role="status"><span aria-hidden="true">✓</span> Сохранено</span><button type="button" className="undoSet" onClick={remove} disabled={busy} aria-label={`Отменить запись подхода ${index > 0 ? index : `разминки ${Math.abs(index)}`}`}>Отменить</button></div> : <button type="button" className="saveSet" onClick={save} disabled={busy || weight === '' || reps === '' || (index > 0 && rir === '')}>Сохранить</button>}
+    {valueField('факт ПДО', rir, value => { dirty.current.rir = true; setRir(value) }, 0.5, 10, 'decimal')}
+    {saved ? <div className="savedSetActions"><button type="button" className="undoSet" onClick={remove} disabled={busy} aria-label={`Отменить запись подхода ${index > 0 ? index : `разминки ${Math.abs(index)}`}`}>Отменить запись</button><button type="button" className="undoSet" onClick={() => setExpanded(false)}>Свернуть</button></div> : <button type="button" className="saveSet" onClick={save} disabled={busy || weight === '' || reps === '' || (index > 0 && rir === '')}>Сохранить</button>}
+    </>}
   </div>
 }
 
@@ -104,7 +115,7 @@ function ExerciseBlock({ item, onChange, onError }: {
     {item.weight_step === null && <p className="hint">В старом занятии шаг веса не сохранён. Вес можно вводить вручную; кнопки изменения веса и подсказка следующего подхода недоступны.</p>}
     {!item.results.length && <button className="textButton" onClick={() => setEditing(!editing)}>{editing ? 'Скрыть изменение' : 'Изменить цель'}</button>}
     {editing && !item.results.length && <div className="overrideBox"><label>Вес, кг<input type="number" min="0" step="0.5" value={weight} onChange={event => setWeight(event.target.value)} /></label><label>Повторы<input type="number" min="1" value={reps} onChange={event => setReps(event.target.value)} /></label><button onClick={override}>Сохранить</button></div>}
-    {!item.skipped && <div className="setsList"><div className="setsCaption"><span>Подходы</span><span>Факт: вес, повторы, ПДО</span></div><p className="fieldHelp">Запишите фактический ПДО каждого рабочего подхода. Поле пустое до вашего ввода; 0 означает отсутствие запаса повторов.</p><small>Разминка (не входит в объём)</small>{Array.from({ length: warmups }, (_, n) => <SetRow key={-n - 1} item={item} index={-n - 1} onChange={onChange} onError={onError} />)}<div className="programActions warmupActions"><button disabled={warmups >= 5 || warmupBusy} onClick={() => setWarmups(count => count + 1)}>+ Разминка</button><button disabled={warmups === 0 || warmupBusy} onClick={removeWarmup}>− Разминка</button></div>{Array.from({ length: item.sets_count }, (_, n) => <SetRow key={n + 1} item={item} index={n + 1} onChange={onChange} onError={onError} />)}<div className="programActions"><button disabled={item.sets_count >= 12} onClick={async () => { try { onChange(await mutate(() => api.changeSetsCount(item.id, item.sets_count + 1))) } catch (err) { onError((err as Error).message) } }}>+ Подход</button><button disabled={item.sets_count <= 1 || item.results.some(result => result.is_working && result.set_index === item.sets_count)} onClick={async () => { try { onChange(await mutate(() => api.changeSetsCount(item.id, item.sets_count - 1))) } catch (err) { onError((err as Error).message) } }}>− Подход</button></div></div>}
+    {!item.skipped && <div className="setsList"><div className="setsCaption"><span>Подходы</span><span>Факт: вес, повторы, ПДО</span></div><p className="fieldHelp">ПДО подставлен из плана; при необходимости измените его перед сохранением. 0 означает отсутствие запаса повторов.</p><small>Разминка (не входит в объём)</small>{Array.from({ length: warmups }, (_, n) => <SetRow key={-n - 1} item={item} index={-n - 1} onChange={onChange} onError={onError} />)}<div className="programActions warmupActions"><button disabled={warmups >= 5 || warmupBusy} onClick={() => setWarmups(count => count + 1)}>+ Разминка</button><button disabled={warmups === 0 || warmupBusy} onClick={removeWarmup}>− Разминка</button></div>{Array.from({ length: item.sets_count }, (_, n) => <SetRow key={n + 1} item={item} index={n + 1} onChange={onChange} onError={onError} />)}<div className="programActions"><button disabled={item.sets_count >= 12} onClick={async () => { try { onChange(await mutate(() => api.changeSetsCount(item.id, item.sets_count + 1))) } catch (err) { onError((err as Error).message) } }}>+ Подход</button><button disabled={item.sets_count <= 1 || item.results.some(result => result.is_working && result.set_index === item.sets_count)} onClick={async () => { try { onChange(await mutate(() => api.changeSetsCount(item.id, item.sets_count - 1))) } catch (err) { onError((err as Error).message) } }}>− Подход</button></div></div>}
     <button className="skipButton" onClick={skip}>{item.skipped ? 'Вернуть упражнение' : 'Пропустить упражнение'}</button>
   </section>
 }
@@ -154,14 +165,16 @@ export function WorkoutView({ session, onChange, onBack, onComplete, onError }: 
   }
   return <MutationContext.Provider value={mutate}>
     <button className="backButton" onClick={onBack} disabled={pending > 0}>← <span>К плану</span></button>
-    <fieldset className="workoutFields" disabled={pending > 0 || busy} aria-busy={pending > 0}>
+    <fieldset className="workoutFields" disabled={busy} aria-busy={pending > 0}>
     <div className="workoutTitle"><span className="eyebrow">{dateLabel} · {session.phase === 'deload' ? session.period_kind === 'cycle' ? 'Лёгкий цикл' : 'Легкая неделя' : `${phaseText[session.phase]} тренировка`}</span><h1>{session.template_name}</h1><p>{session.muscle_group}</p></div>
     {session.deload_reason && <p className="hint">{session.period_kind === 'cycle' ? 'Лёгкий цикл' : 'Легкая неделя'}: {session.deload_reason === 'scheduled' ? session.period_kind === 'cycle' ? 'после трёх завершённых циклов' : 'по календарю' : session.deload_reason === 'auto' ? 'по сигналам восстановления' : 'по вашему выбору'}.</p>}
-    {session.week_start && <button className="outlineButton" onClick={async () => { try { await mutate(() => api.setRecovery(session.week_start!, !session.feeling_beat_up)); onChange({ ...session, feeling_beat_up: !session.feeling_beat_up }) } catch (err) { onError((err as Error).message) } }}>{session.feeling_beat_up ? 'Отмечено: тяжело / болит' : 'Отметить: тяжело / болит'}</button>}
-    {session.status === 'planned' && <div className="fieldGrid"><label className="field"><span>Перенести на дату</span><input type="date" value={newDate} onChange={event => setNewDate(event.target.value)} /></label><button className="outlineButton" onClick={async () => { try { onChange(await mutate(() => api.reschedule(session.id, newDate))) } catch (err) { onError((err as Error).message) } }}>Перенести</button></div>}
+    <div className="workoutActions">
+      {session.week_start && <button type="button" className="workoutActionChip" onClick={async () => { const previous = session.feeling_beat_up; onChange({ ...session, feeling_beat_up: !previous }); try { await mutate(() => api.setRecovery(session.week_start!, !previous)) } catch (err) { onChange({ ...session, feeling_beat_up: previous }); onError((err as Error).message) } }}>{session.feeling_beat_up ? '✓ Тяжело / болит' : 'Отметить самочувствие'}</button>}
+      {session.status === 'planned' && <details className="reschedulePanel"><summary>Перенести тренировку</summary><div className="rescheduleContent"><label className="field"><span>Новая дата</span><input type="date" value={newDate} onChange={event => setNewDate(event.target.value)} /></label><button className="outlineButton" type="button" onClick={async () => { try { onChange(await mutate(() => api.reschedule(session.id, newDate))) } catch (err) { onError((err as Error).message) } }}>Подтвердить перенос</button></div></details>}
+    </div>
     <div className="completionMeter"><div className="meterTop"><span>Записано результатов</span><strong aria-live="polite">{saved}<em> / {total}</em></strong></div><div className="meterTrack"><div style={{ width: `${total ? saved / total * 100 : 0}%` }} /></div></div>
     {session.exercises.map(item => item.kind === 'strength' ? <ExerciseBlock key={item.id} item={item} onChange={onChange} onError={onError} /> : <TimedExerciseBlock key={item.id} item={item} onChange={onChange} onError={onError} />)}
-    <button className="primaryButton finishButton" onClick={complete} disabled={busy || saved !== total || total === 0}>Завершить тренировку</button>
+    <button className="primaryButton finishButton" onClick={complete} disabled={busy || pending > 0 || saved !== total || total === 0}>Завершить тренировку</button>
     <p className="hint">{pending > 0 ? 'Сохраняем изменения…' : 'Результаты сохраняются сразу. К тренировке можно вернуться позже.'}</p>
     </fieldset>
   </MutationContext.Provider>

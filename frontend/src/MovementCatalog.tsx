@@ -41,9 +41,9 @@ function MovementForm({ movement, muscles, initialMuscle, initialKind = 'strengt
   </fieldset></form>
 }
 
-export function MovementCatalog({ movements, detailGroups, refreshMovements, run }: {
+export function MovementCatalog({ movements, detailGroups, refreshMovements, run, canEdit }: {
   movements: Movement[]; detailGroups: Record<string, string[]>;
-  refreshMovements: () => Promise<void>; run: (action: () => Promise<unknown>) => Promise<void>
+  refreshMovements: () => Promise<void>; run: (action: () => Promise<unknown>) => Promise<void>; canEdit: boolean
 }) {
   const [muscle, setMuscle] = useState('all')
   const [search, setSearch] = useState('')
@@ -66,10 +66,10 @@ export function MovementCatalog({ movements, detailGroups, refreshMovements, run
     </div>
     {query.length > 0 && query.length < 3 && <p className="fieldHelp">Введите не меньше трёх букв для поиска.</p>}
     <div className="catalogList">{filtered.length ? filtered.map(item => <div className="catalogItem" key={item.id}>
-      <div className="catalogItemRow"><div><strong>{item.name}</strong><small>{item.kind === 'strength' ? item.primary_group : movementKinds[item.kind]}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></div><button type="button" onClick={() => setEditing(editing === item.id ? null : item.id)} aria-label={`${editing === item.id ? 'Свернуть настройки' : 'Изменить'} ${item.name}`} aria-expanded={editing === item.id}>✎</button></div>
-      {editing === item.id && <MovementForm key={item.id} movement={item} muscles={muscles} initialMuscle="" onSave={data => save(item, data)} onClose={() => setEditing(null)} />}
+      <div className="catalogItemRow"><div><strong>{item.name}</strong><small>{item.kind === 'strength' ? item.primary_group : movementKinds[item.kind]}{item.secondary_groups.length ? ` · дополнительно: ${item.secondary_groups.join(', ')}` : ''}{item.is_anchor ? ' · якорное' : ''}</small></div>{canEdit && <button type="button" onClick={() => setEditing(editing === item.id ? null : item.id)} aria-label={`${editing === item.id ? 'Свернуть настройки' : 'Изменить'} ${item.name}`} aria-expanded={editing === item.id}>✎</button>}</div>
+      {canEdit && editing === item.id && <MovementForm key={item.id} movement={item} muscles={muscles} initialMuscle="" onSave={data => save(item, data)} onClose={() => setEditing(null)} />}
     </div>) : <p className="fieldHelp catalogEmpty">Упражнения не найдены.</p>}</div>
-    {editing === 'new' ? <MovementForm key="new" muscles={muscles} initialMuscle={muscle === 'all' || muscle.startsWith('kind:') ? '' : muscle} initialKind={muscle.startsWith('kind:') ? muscle.slice(5) as Movement['kind'] : 'strength'} onSave={data => save(undefined, data)} onClose={() => setEditing(null)} />
-      : <button className="outlineButton" onClick={() => setEditing('new')}>+ Добавить упражнение</button>}
+    {canEdit && (editing === 'new' ? <MovementForm key="new" muscles={muscles} initialMuscle={muscle === 'all' || muscle.startsWith('kind:') ? '' : muscle} initialKind={muscle.startsWith('kind:') ? muscle.slice(5) as Movement['kind'] : 'strength'} onSave={data => save(undefined, data)} onClose={() => setEditing(null)} />
+      : <button className="outlineButton" onClick={() => setEditing('new')}>+ Добавить упражнение</button>)}
   </section>
 }

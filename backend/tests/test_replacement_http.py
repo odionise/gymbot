@@ -12,7 +12,8 @@ from sqlalchemy import func, select
 
 from app import auth, main
 from app.db import Base, get_db
-from app.models import Exercise
+from app.models import Exercise, Movement
+from app.serializers import movement_dict
 
 TEST_TOKEN = "test-only-key-never-a-real-bot-token"
 
@@ -56,20 +57,32 @@ def client(database, clock, monkeypatch):
 
 def api_program(client, clock, user_id=1001):
     headers = signed_header(user_id, clock)
-    movement = client.post("/api/movements", headers=headers, json={
-        "name": "Движение A", "kind": "strength", "primary_group": "Грудь",
-    })
-    movement.raise_for_status()
+    client.get('/api/me', headers=headers).raise_for_status()
+    movement = seed_personal_movement(user_id, "Движение A", "strength", "Грудь")
     template = client.post("/api/templates", headers=headers, json={
         "name": "Синтетический день", "muscle_group": "Грудь", "weekday": 0, "send_time": "09:00",
     })
     template.raise_for_status()
     exercise = client.post(f'/api/templates/{template.json()["id"]}/exercises', headers=headers, json={
-        "name": "Движение A", "movement_id": movement.json()["id"], "medium_weight": 80,
+        "name": "Движение A", "movement_id": movement["id"], "medium_weight": 80,
         "sets_count": 2, "weight_step": 2.5, "rep_min": 6, "rep_max": 12,
     })
     exercise.raise_for_status()
-    return headers, movement.json(), exercise.json()
+    return headers, movement, exercise.json()
+
+
+def seed_personal_movement(user_id, name, kind="strength", primary_group="Грудь"):
+    """Pre-admin entries remain usable only by their original owner."""
+    db_iter = main.app.dependency_overrides[get_db]()
+    db = next(db_iter)
+    try:
+        item = Movement(user_id=user_id, name=name, kind=kind, primary_group=primary_group)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return movement_dict(item)
+    finally:
+        db_iter.close()
 
 
 def replacement_body(movement_id, **changes):
@@ -161,7 +174,7 @@ def test_explicit_zero_is_a_valid_start_and_retry_is_a_conflict(client, clock, d
 @pytest.mark.parametrize("duration", [None, 0])
 def test_timed_replacement_requires_positive_minutes(client, clock, kind, duration):
     headers, _, exercise = api_program(client, clock)
-    movement = client.post("/api/movements", headers=headers, json={"name": "Время", "kind": kind}).json()
+    movement = seed_personal_movement(1001, "Время", kind, "Не применяется")
     body = replacement_body(movement["id"], settings={} if duration is None else {"duration_minutes": duration})
     assert client.post(f'/api/exercises/{exercise["id"]}/replace', headers=headers, json=body).status_code == 422
 

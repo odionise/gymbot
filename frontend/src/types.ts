@@ -80,6 +80,7 @@ export interface CycleConfig {
   length_days: number | null
   start_date: string | null
   slots: { day: number; template_id: string }[]
+  current_cycle?: { start_date: string; phase: 'accumulation' | 'deload' | 'vacation'; number: number; completed_slots: number; total_slots: number } | null
 }
 
 export interface SetResult {
@@ -199,4 +200,4 @@ export interface Me {
   profile_complete: boolean
 }
 
-export interface NextWeek { week_start: string; kind: 'deload' | 'vacation' | null; unit?: 'week' | 'cycle'; length_days?: number }
+export interface NextWeek { week_start: string; kind: 'deload' | 'vacation' | null; unit?: 'week' | 'cycle'; length_days?: number; waiting_for_completion?: boolean }

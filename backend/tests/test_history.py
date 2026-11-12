@@ -6,15 +6,30 @@ import pytest
 
 from app.analytics import progress_for_user
 from app.main import (
-    complete_session, create_exercise, create_movement, create_template,
+    complete_session, create_exercise, create_template,
     delete_exercise, history, manual_deload, next_week_start, save_duration,
     save_set, session_detail, replace_exercise, update_movement,
 )
-from app.models import Exercise, User, WorkoutTemplate
+from app.models import Exercise, Movement, User, WorkoutTemplate
 from app.planning import get_or_create_session
 from app.schemas import DurationIn, ExerciseIn, MovementIn, ReplacementIn, ResultIn, TemplateIn
+from app.serializers import movement_dict
 
 START = date(2026, 10, 26)
+
+
+def create_legacy_movement(data, user, db):
+    """Seed a pre-existing personal catalog entry; public creation is admin-only."""
+    item = Movement(user_id=user.telegram_id, name=data.name, kind=data.kind,
+                    primary_group=data.primary_group, secondary_groups=", ".join(data.secondary_groups),
+                    is_anchor=data.is_anchor)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return movement_dict(item)
+
+
+create_movement = create_legacy_movement
 
 
 def program(db, kind="strength"):
@@ -135,7 +150,7 @@ def test_created_workout_keeps_its_snapshot_when_program_and_catalog_change(data
         replace(db, user, exercise_id, "Движение B", kind="cardio")
         update_movement(before["movement_id"], MovementIn(
             name="Новое имя в справочнике", kind="strength", primary_group="Грудь",
-        ), user, db)
+        ), User(telegram_id=5540948403), db)
         db.expire_all()
         after = session_detail(session.id, user, db)["exercises"][0]
         stored_fields = (

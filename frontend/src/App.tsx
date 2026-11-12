@@ -150,13 +150,13 @@ function ProgramLoadError({ cachedAt, onRetry }: { cachedAt: string | null; onRe
   </div>
 }
 
-export function ProgramPanel({ templates, loadedAt, error, onRetry, run }: {
+export function ProgramPanel({ templates, loadedAt, error, onRetry, run, canEditCatalog, onTemplateDeleted }: {
   templates: Template[]; loadedAt: string | null; error: string; onRetry: () => void;
-  run: (action: () => Promise<unknown>) => Promise<void>
+  run: (action: () => Promise<unknown>) => Promise<void>; canEditCatalog: boolean; onTemplateDeleted?: (id: string) => void
 }) {
   return <>
     {error && <ProgramLoadError cachedAt={loadedAt} onRetry={onRetry} />}
-    {loadedAt ? <ProgramView templates={templates} run={run} /> : !error && <div className="emptyCard">Загружаем программу…</div>}
+    {loadedAt ? <ProgramView templates={templates} run={run} canEditCatalog={canEditCatalog} onTemplateDeleted={onTemplateDeleted} /> : !error && <div className="emptyCard">Загружаем программу…</div>}
   </>
 }
 
@@ -245,8 +245,19 @@ export default function App() {
   const run = async (action: () => Promise<unknown>) => {
     setError('')
     try { await action() } catch (err) { setError((err as Error).message); return }
-    try { await refresh() } catch (err) {
-      setError(`Сервер подтвердил действие, но экран не обновился. Повторите загрузку вместо повторного сохранения. ${(err as Error).message}`)
+    void refresh().catch((err: Error) => setError(`Сервер подтвердил действие, но экран не обновился. Повторите загрузку вместо повторного сохранения. ${err.message}`))
+  }
+
+  const changeNextPeriod = async (kind: 'deload' | 'vacation' | null) => {
+    const previous = nextWeek
+    if (previous) setNextWeek({ ...previous, kind })
+    setWeekMenuOpen(false)
+    try {
+      const confirmed = kind ? await api.setNextWeek(kind) : await api.clearNextWeek()
+      setNextWeek(confirmed)
+    } catch (err) {
+      setNextWeek(previous)
+      setError((err as Error).message)
     }
   }
 
@@ -287,7 +298,7 @@ export default function App() {
         onError={setError}
       /> : tab === 'today' ? <>
         <div className="eyebrow todayDate">{todayLabel}</div>
-        <div className="todayHeading"><h1>Сегодня</h1><div className="nextWeekControl"><button className="nextWeekTrigger" type="button" aria-expanded={weekMenuOpen} onClick={() => setWeekMenuOpen(!weekMenuOpen)}>Следующий {nextPeriodName}{nextWeek?.kind ? `: ${nextWeek.kind === 'vacation' ? 'отпуск' : 'лёгкий'}` : ''} <span aria-hidden="true">⌄</span></button>{weekMenuOpen && <div className="nextWeekMenu"><strong>{nextWeek?.unit === 'cycle' ? 'Цикл' : 'Неделя'} с {upcomingLabel}</strong><p>Выберите исключение из обычного плана. Решение можно отменить до начала периода.</p><button className={nextWeek?.kind === 'deload' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('deload')); setWeekMenuOpen(false) })}>{nextWeek?.unit === 'cycle' ? 'Лёгкий цикл' : 'Лёгкая неделя'} <small>Меньше подходов, ПДО 4</small></button><button className={nextWeek?.kind === 'vacation' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('vacation')); setWeekMenuOpen(false) })}>Отпуск <small>Без тренировок; план продолжится позже</small></button>{nextWeek?.kind && <button className="clearWeek" onClick={() => run(async () => { setNextWeek(await api.clearNextWeek()); setWeekMenuOpen(false) })}>Отменить решение</button>}</div>}</div></div>
+        <div className="todayHeading"><h1>Сегодня</h1><div className="nextWeekControl"><button className="nextWeekTrigger" type="button" aria-expanded={weekMenuOpen} onClick={() => setWeekMenuOpen(!weekMenuOpen)}>Следующий {nextPeriodName}{nextWeek?.kind ? `: ${nextWeek.kind === 'vacation' ? 'отпуск' : 'лёгкий'}` : ''} <span aria-hidden="true">⌄</span></button>{weekMenuOpen && <div className="nextWeekMenu"><strong>{nextWeek?.unit === 'cycle' ? 'Цикл' : 'Неделя'} с {upcomingLabel}</strong><p>{nextWeek?.unit === 'cycle' ? nextWeek.waiting_for_completion ? 'Начнётся после завершения всех занятий текущего цикла, не раньше указанной даты. Текущий цикл не прерывается.' : 'Начнётся после текущего цикла, не раньше указанной даты. Продлится столько же дней.' : 'Пока программа работает по неделям: решение начнётся в ближайший понедельник. Настройте цикл в разделе «Программа».'}</p><button className={nextWeek?.kind === 'deload' ? 'selected' : ''} onClick={() => void changeNextPeriod('deload')}>{nextWeek?.unit === 'cycle' ? 'Лёгкий цикл' : 'Лёгкая неделя'} <small>Меньше подходов, ПДО 4</small></button><button className={nextWeek?.kind === 'vacation' ? 'selected' : ''} onClick={() => void changeNextPeriod('vacation')}>Отпуск <small>Без тренировок; план продолжится позже</small></button>{nextWeek?.kind && <button className="clearWeek" onClick={() => void changeNextPeriod(null)}>Отменить решение</button>}</div>}</div></div>
         {sessions.length ? <div className="sessionList">{sessions.map(session =>
           <article className="heroSession" key={session.id}>
             <div className="heroTop"><span className="heroKicker">Тренировка по плану</span><span className={`phasePill phase-${session.phase}`}>{phaseText[session.phase]}</span></div>
@@ -310,7 +321,7 @@ export default function App() {
         )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу</button>}
         {me && !me.has_started_bot && <p className="hint">Чтобы получать сообщения, сначала отправьте боту команду /start.</p>}
         <HomeFaq />
-      </> : tab === 'program' ? <><div className="profileShortcut"><span>{me?.display_name}{me?.age !== null ? ` · ${me?.age} лет` : ''}</span><button type="button" className="textButton" onClick={() => setEditingProfile(!editingProfile)}>{editingProfile ? 'Свернуть анкету' : 'Изменить анкету'}</button></div>{editingProfile && me && <ProfileForm profile={me} onSaved={profile => { setMe(profile); setEditingProfile(false) }} onClose={() => setEditingProfile(false)} />}<ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} /></>
+      </> : tab === 'program' ? <><div className="profileShortcut"><span>{me?.display_name}{me?.age !== null ? ` · ${me?.age} лет` : ''}</span><button type="button" className="textButton" onClick={() => setEditingProfile(!editingProfile)}>{editingProfile ? 'Свернуть анкету' : 'Изменить анкету'}</button></div>{editingProfile && me && <ProfileForm profile={me} onSaved={profile => { setMe(profile); setEditingProfile(false) }} onClose={() => setEditingProfile(false)} />}<ProgramPanel templates={templates} loadedAt={programLoadedAt} error={programError} onRetry={retryLoad} run={run} canEditCatalog={me.is_admin} onTemplateDeleted={id => { setTemplates(items => items.filter(item => item.id !== id)); setSessions(items => items.filter(item => item.template_id !== id)) }} /></>
         : tab === 'progress' ? <ProgressView />
           : tab === 'admin' && me.is_admin ? <AdminView /> : <HistoryView />}
     </main>
