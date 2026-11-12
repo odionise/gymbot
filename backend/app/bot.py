@@ -11,7 +11,7 @@ from sqlalchemy import select
 from .config import get_settings
 from .db import SessionLocal
 from .models import Reminder, User, WeekOverride, WorkoutTemplate
-from .planning import PHASES, get_or_create_session, monday
+from .planning import PHASES, due_cycle_slot, get_or_create_session, monday
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -122,7 +122,8 @@ def today_replies(db, user_id):
     if not profile_complete(user):
         return [profile_prompt(user)]
     local_today = datetime.now(ZoneInfo(user.timezone)).date()
-    templates = list(db.scalars(select(WorkoutTemplate).where(
+    cycle_due = due_cycle_slot(db, user, local_today) if user.cycle_days is not None else None
+    templates = ([db.get(WorkoutTemplate, cycle_due[0]["template_id"])] if cycle_due else []) if user.cycle_days is not None else list(db.scalars(select(WorkoutTemplate).where(
         WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True),
         WorkoutTemplate.weekday == local_today.weekday(),
     )))
@@ -130,7 +131,9 @@ def today_replies(db, user_id):
         return [("На сегодня тренировок нет.", app_button())]
     replies = []
     for template in templates:
-        session = get_or_create_session(db, template, local_today)
+        if template is None or not template.active:
+            continue
+        session = get_or_create_session(db, template, cycle_due[1], cycle_due[0]["day"]) if cycle_due else get_or_create_session(db, template, local_today)
         if session:
             replies.append((format_plan(session, local_today), app_button(session.id)))
     if replies:
@@ -144,11 +147,13 @@ def today_replies(db, user_id):
 
 
 def format_plan(session, display_date) -> str:
-    phase = "Легкая неделя" if session.phase_type == "deload" else "накопление" if session.phase_type else PHASES[session.phase]
+    cycle = bool(session.week and session.week.period_kind == "cycle")
+    phase = ("Лёгкий цикл" if cycle else "Легкая неделя") if session.phase_type == "deload" else "накопление" if session.phase_type else PHASES[session.phase]
     lines = [f"{session.template_name} · {phase} · {display_date:%d.%m.%Y}"]
     if session.week and session.week.deload_reason:
-        reason = {"scheduled": "по календарю", "auto": "по сигналам восстановления", "manual": "по вашему выбору"}[session.week.deload_reason]
-        lines.append(f"Легкая неделя {reason}")
+        reason = {"scheduled": "после трёх завершённых циклов" if cycle else "по календарю",
+                  "auto": "по сигналам восстановления", "manual": "по вашему выбору"}[session.week.deload_reason]
+        lines.append(f"{'Лёгкий цикл' if cycle else 'Легкая неделя'} {reason}")
     for exercise in session.exercises:
         if exercise.kind != "strength":
             lines.append(f"• {exercise.name}: {exercise.target_duration_minutes} мин")
@@ -175,14 +180,21 @@ async def send_due_reminders(bot: Bot, now: datetime | None = None) -> int:
             if not user or user.chat_id != user.telegram_id or not profile_complete(user):
                 continue
             local = moment.astimezone(ZoneInfo(user.timezone))
-            if local.weekday() != template.weekday or local.strftime("%H:%M") < template.send_time:
+            cycle_due = due_cycle_slot(db, user, local.date()) if user.cycle_days is not None else None
+            if user.cycle_days is not None:
+                if not cycle_due or cycle_due[0]["template_id"] != template.id:
+                    continue
+            elif local.weekday() != template.weekday:
+                continue
+            if local.strftime("%H:%M") < template.send_time:
                 continue
             exists = db.scalars(select(Reminder).where(
                 Reminder.template_id == template.id, Reminder.local_date == local.date()
             )).first()
             if exists:
                 continue
-            session = get_or_create_session(db, template, local.date())
+            session = (get_or_create_session(db, template, cycle_due[1], cycle_due[0]["day"])
+                       if cycle_due else get_or_create_session(db, template, local.date()))
             if not session or session.status == "completed":
                 db.rollback()
                 continue

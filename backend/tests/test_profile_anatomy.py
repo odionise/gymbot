@@ -28,12 +28,11 @@ def test_profile_migration_from_six_preserves_existing_user(request, factory_fix
         connection.execute(text('ALTER TABLE users DROP COLUMN display_name'))
         connection.execute(text('ALTER TABLE users DROP COLUMN birth_date'))
         connection.execute(text('ALTER TABLE users DROP COLUMN telegram_username'))
-        connection.execute(text('DELETE FROM schema_versions WHERE version = 7'))
-        connection.execute(text('DELETE FROM schema_versions WHERE version = 8'))
+        connection.execute(text('DELETE FROM schema_versions WHERE version >= 7'))
     migrate(engine)
     migrate(engine)
     with engine.connect() as connection:
-        assert connection.execute(text('SELECT MAX(version) FROM schema_versions')).scalar_one() == 8
+        assert connection.execute(text('SELECT MAX(version) FROM schema_versions')).scalar_one() == 9
         assert connection.execute(text('SELECT telegram_id, sex, display_name, birth_date FROM users')).one() == (7501, None, None, None)
 
 

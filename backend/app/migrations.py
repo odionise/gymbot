@@ -109,3 +109,20 @@ def migrate(engine):
                 connection.execute(text("ALTER TABLE users ADD COLUMN telegram_username VARCHAR(32)"))
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_telegram_username ON users (telegram_username)"))
             connection.execute(text("INSERT INTO schema_versions (version) VALUES (8)"))
+        if version < 9:
+            inspector.clear_cache()
+            additions = {
+                "users": {"cycle_days": "INTEGER", "cycle_anchor": "DATE",
+                          "next_cycle_override": "VARCHAR(16)"},
+                "workout_templates": {"cycle_days_json": "TEXT NOT NULL DEFAULT '[]'"},
+                "training_weeks": {"period_kind": "VARCHAR(8) NOT NULL DEFAULT 'week'",
+                                   "period_days": "INTEGER NOT NULL DEFAULT 7",
+                                   "schedule_json": "TEXT NOT NULL DEFAULT '[]'"},
+                "workout_sessions": {"cycle_day": "INTEGER"},
+            }
+            for table, columns in additions.items():
+                existing = {column["name"] for column in inspector.get_columns(table)}
+                for name, specification in columns.items():
+                    if name not in existing:
+                        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {specification}"))
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (9)"))

@@ -21,6 +21,9 @@ def progress_for_user(db: Session, user_id: int) -> dict:
     ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
               selectinload(WorkoutSession.exercises).selectinload(SessionExercise.exercise))
      .order_by(WorkoutSession.completed_at.asc().nulls_first(), WorkoutSession.id)))
+    periods_by_id = {period.id: period for period in db.scalars(select(TrainingWeek).where(
+        TrainingWeek.user_id == user_id))}
+    periods_by_start = {period.week_start: period for period in periods_by_id.values()}
     exercise_points = defaultdict(list)
     weekly = defaultdict(lambda: {"hard_sets": 0.0, "working_sets": 0.0,
                                    "tonnage": 0.0, "rirs": [], "reps": defaultdict(list)})
@@ -30,7 +33,8 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                                   "tonnage": 0.0, "rirs": [], "reps": defaultdict(list), "phases": set()})
     for session in sessions:
         day = session.actual_date or session.scheduled_date
-        start = monday(day)
+        saved_period = periods_by_id.get(session.week_id)
+        start = saved_period.week_start if saved_period and saved_period.period_kind == "cycle" else monday(day)
         for exercise in session.exercises:
             if exercise.kind != "strength" or exercise.skipped or not exercise.results:
                 continue
@@ -49,6 +53,8 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                 "name": exercise.name, "template_name": session.template_name,
                 "position": exercise.position, "group": groups[0] if groups else "",
                 "groups": groups, "date": day.isoformat(), "phase": phase,
+                "period_start": start.isoformat(),
+                "period_days": saved_period.period_days if saved_period and saved_period.period_kind == "cycle" else 7,
                 "weight": max(float(r.weight) for r in results),
                 "reps": max(r.reps for r in results), "volume": round(volume, 2),
                 "estimated_strength": round(strength, 2) if strength is not None else None,
@@ -78,8 +84,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                             bucket["hard_sets"] += factor
                             if session.phase_type == "accumulation":
                                 bucket["reps"][(key, float(r.weight), float(r.rir_reported))].append(r.reps)
-    weeks = {w.week_start: w for w in db.scalars(select(TrainingWeek).where(
-        TrainingWeek.user_id == user_id).order_by(TrainingWeek.week_start))}
+    weeks = periods_by_start
     comparable = defaultdict(set)
     for (start, group), bucket in weekly.items():
         if weeks.get(start) and weeks[start].phase_type == "accumulation":
@@ -93,18 +98,20 @@ def progress_for_user(db: Session, user_id: int) -> dict:
         custom = json.loads(week.targets_json or "{}").get(group, [12, 18, 20]) if week else [12, 18, 20]
         target_low = min(custom[1], custom[0] + 2 * max(0, (week.week_number if week else 1) - 1))
         target_high = min(custom[1], target_low + 2)
+        scale = week.period_days / 7 if week and week.period_kind == "cycle" else 1
         quality = [mean(values) for key, values in data["reps"].items()
                    if phase == "accumulation" and len(comparable[(group, key)]) >= 2]
         has_target = group in VOLUME_TARGET_GROUPS
-        row = {"week_start": start.isoformat(), "group": group, "phase": phase,
+        row = {"week_start": start.isoformat(), "period_days": week.period_days if week else 7,
+               "period_kind": week.period_kind if week else "week", "group": group, "phase": phase,
                "deload_reason": week.deload_reason if week else None,
                "hard_sets": round(data["hard_sets"], 1),
                "working_sets": round(data["working_sets"], 1),
                "tonnage": round(data["tonnage"], 1),
                "avg_rir": round(mean(data["rirs"]), 1) if data["rirs"] else None,
                "avg_reps_hard": round(mean(quality), 1) if quality else None,
-               "target_low": (5 if phase == "deload" else target_low) if has_target else None,
-               "target_high": (8 if phase == "deload" else target_high) if has_target else None}
+               "target_low": round((5 if phase == "deload" else target_low) * scale) if has_target else None,
+               "target_high": round((8 if phase == "deload" else target_high) * scale) if has_target else None}
         if phase == "deload":
             prior = [r for r in rows if r["group"] == group and r["phase"] == "accumulation"]
             baseline = median(r["working_sets"] for r in prior[-2:]) if prior else None
@@ -112,14 +119,14 @@ def progress_for_user(db: Session, user_id: int) -> dict:
             if row["missed_deload"]:
                 row["phase"] = "missed_deload"
                 signals.append(f"{group}: Легкая неделя не снизила объём")
-            if has_target and row["working_sets"] < 5 and start + timedelta(days=6) < local_today:
-                signals.append(f"{group}: в легкую неделю менее 5 рабочих подходов")
+            if has_target and row["working_sets"] < round(5 * scale) and start + timedelta(days=(week.period_days if week else 7) - 1) < local_today:
+                signals.append(f"{group}: в лёгком периоде мало рабочих подходов")
         else:
             row["missed_deload"] = False
-            if has_target and row["hard_sets"] < 10 and start + timedelta(days=6) < local_today:
-                signals.append(f"{group}: менее 10 жёстких подходов за неделю")
-            if has_target and row["hard_sets"] > 20:
-                signals.append(f"{group}: объём превысил 20 жёстких подходов")
+            if has_target and row["hard_sets"] < round(10 * scale) and start + timedelta(days=(week.period_days if week else 7) - 1) < local_today:
+                signals.append(f"{group}: менее {round(10 * scale)} интенсивных подходов за период")
+            if has_target and row["hard_sets"] > round(20 * scale):
+                signals.append(f"{group}: объём интенсивных подходов выше ориентира")
             if row["avg_rir"] is not None and row["avg_rir"] < 1:
                 signals.append(f"{group}: средний ПДО ниже 1 — проверьте восстановление")
         if week and week.feeling_beat_up:
@@ -137,7 +144,8 @@ def progress_for_user(db: Session, user_id: int) -> dict:
         quality = [mean(values) for key, values in bucket["reps"].items()
                    if phase == "accumulation" and len(total_comparable[key]) >= 2]
         missed = bool(week and phase == "deload" and week.missed_deload)
-        summary.append({"week_start": start.isoformat(), "group": "Все мышцы",
+        summary.append({"week_start": start.isoformat(), "period_days": week.period_days if week else 7,
+                        "period_kind": week.period_kind if week else "week", "group": "Все мышцы",
                         "phase": "missed_deload" if missed else phase,
                         "deload_reason": week.deload_reason if week else None,
                         "missed_deload": missed, "target_low": None, "target_high": None,

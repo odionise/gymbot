@@ -89,8 +89,8 @@ const faqItems = [
   {
     question: 'Как работает цикл и легкая неделя?',
     paragraphs: [
-      'Обычно идут три недели накопления нагрузки и затем легкая неделя. Объём может расти постепенно по результатам; при усталости план удержит или снизит его.',
-      'На легкой неделе подходов примерно вдвое меньше, вес не повышается, цель — ПДО 4. Пропуск отдельной тренировки сам по себе фазу не переключает.',
+      'В программе задайте длину тренировочного цикла и его занятия. После трёх полностью завершённых циклов накопления следует лёгкий цикл такой же длины. Если один круг занимает 9 дней, лёгкий отрезок тоже длится 9 дней.',
+      'В лёгком цикле подходов примерно вдвое меньше, вес не повышается, цель — ПДО 4. Пропуск или перенос занятия не переключает фазу: цикл ждёт завершения всех своих тренировок.',
       'Восстановление оценивается только по новым рабочим подходам с указанным ПДО.',
     ],
   },
@@ -104,15 +104,15 @@ const faqItems = [
   {
     question: 'Что делают «Легкая неделя» и «Отпуск» в меню сверху?',
     paragraphs: [
-      'Эти действия назначают исключение на следующую календарную неделю. Внеочередная легкая неделя снижает нагрузку и завершает текущий блок; после неё начнётся новый.',
-      'Отпуск убирает тренировки на неделю и ставит цикл на паузу. Когда неделя закончится, план продолжится с той же следующей фазы.',
-      'Выбор можно отменить до начала недели, пока на неё и последующие недели не созданы тренировки.',
+      'Для программы с циклом эти действия назначают исключение на следующий цикл. Внеочередной лёгкий цикл снижает нагрузку и завершает текущий блок; после него начнётся новый.',
+      'Отпуск убирает тренировки на длительность одного цикла. После него план продолжится с той же следующей фазы.',
+      'Выбор можно отменить до начала нового периода.',
     ],
   },
   {
     question: 'Что показывают графики прогресса?',
     paragraphs: [
-      '«Рабочие подходы» — недельный объём по мышцам: основной мышце подход даёт 1, дополнительной — 0,5. Отдельно показаны подходы с ПДО ≤ 3, тоннаж, средний ПДО и сопоставимые повторы.',
+      '«Рабочие подходы» — объём за тренировочный период по мышцам: основной мышце подход даёт 1, дополнительной — 0,5. Отдельно показаны подходы с ПДО ≤ 3, тоннаж, средний ПДО и сопоставимые повторы.',
       'В своде «Все мышцы» каждый рабочий подход учтён один раз. Тоннаж — сумма веса × повторы, средний ПДО — по известным фактам. Подход с неизвестным ПДО входит в тоннаж, но его жёсткость не определяется; отсутствие мышечной разметки не удаляет его из общего свода. Для старых записей с неизвестной датой выполнения графики используют плановую дату.',
       'e1RM — примерная оценка максимума на один повтор по формуле «вес × (1 + повторы / 30)» для подходов с 2–10 повторами.',
       'Кардио, растяжка, разминка и отпуск в силовую аналитику не входят.',
@@ -274,6 +274,7 @@ export default function App() {
   const todayLabel = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', weekday: 'long', timeZone: me?.timezone || 'Europe/Moscow' }).format(new Date())
   const completedSets = completedToday.reduce((sum, item) => sum + item.exercises.reduce((count, exercise) => count + (exercise.kind === 'strength' ? exercise.results.length : exercise.actual_duration_minutes ? 1 : 0), 0), 0)
   const upcomingLabel = nextWeek ? new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(`${nextWeek.week_start}T12:00:00Z`)) : ''
+  const nextPeriodName = nextWeek?.unit === 'cycle' ? 'цикл' : 'неделя'
   return <div className={`appShell ${selected && selected.status !== 'completed' ? 'isWorkout' : ''}`}>
     {error && <div className="errorToast" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="Закрыть сообщение об ошибке">×</button></div>}
 
@@ -286,7 +287,7 @@ export default function App() {
         onError={setError}
       /> : tab === 'today' ? <>
         <div className="eyebrow todayDate">{todayLabel}</div>
-        <div className="todayHeading"><h1>Сегодня</h1><div className="nextWeekControl"><button className="nextWeekTrigger" type="button" aria-expanded={weekMenuOpen} onClick={() => setWeekMenuOpen(!weekMenuOpen)}>Следующая неделя{nextWeek?.kind ? `: ${nextWeek.kind === 'vacation' ? 'отпуск' : 'легкая'}` : ''} <span aria-hidden="true">⌄</span></button>{weekMenuOpen && <div className="nextWeekMenu"><strong>Неделя с {upcomingLabel}</strong><p>Выберите исключение из обычного плана. Решение можно отменить до начала недели.</p><button className={nextWeek?.kind === 'deload' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('deload')); setWeekMenuOpen(false) })}>Легкая неделя <small>Меньше подходов, ПДО 4</small></button><button className={nextWeek?.kind === 'vacation' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('vacation')); setWeekMenuOpen(false) })}>Отпуск <small>Без тренировок; цикл продолжится позже</small></button>{nextWeek?.kind && <button className="clearWeek" onClick={() => run(async () => { setNextWeek(await api.clearNextWeek()); setWeekMenuOpen(false) })}>Отменить решение</button>}</div>}</div></div>
+        <div className="todayHeading"><h1>Сегодня</h1><div className="nextWeekControl"><button className="nextWeekTrigger" type="button" aria-expanded={weekMenuOpen} onClick={() => setWeekMenuOpen(!weekMenuOpen)}>Следующий {nextPeriodName}{nextWeek?.kind ? `: ${nextWeek.kind === 'vacation' ? 'отпуск' : 'лёгкий'}` : ''} <span aria-hidden="true">⌄</span></button>{weekMenuOpen && <div className="nextWeekMenu"><strong>{nextWeek?.unit === 'cycle' ? 'Цикл' : 'Неделя'} с {upcomingLabel}</strong><p>Выберите исключение из обычного плана. Решение можно отменить до начала периода.</p><button className={nextWeek?.kind === 'deload' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('deload')); setWeekMenuOpen(false) })}>{nextWeek?.unit === 'cycle' ? 'Лёгкий цикл' : 'Лёгкая неделя'} <small>Меньше подходов, ПДО 4</small></button><button className={nextWeek?.kind === 'vacation' ? 'selected' : ''} onClick={() => run(async () => { setNextWeek(await api.setNextWeek('vacation')); setWeekMenuOpen(false) })}>Отпуск <small>Без тренировок; план продолжится позже</small></button>{nextWeek?.kind && <button className="clearWeek" onClick={() => run(async () => { setNextWeek(await api.clearNextWeek()); setWeekMenuOpen(false) })}>Отменить решение</button>}</div>}</div></div>
         {sessions.length ? <div className="sessionList">{sessions.map(session =>
           <article className="heroSession" key={session.id}>
             <div className="heroTop"><span className="heroKicker">Тренировка по плану</span><span className={`phasePill phase-${session.phase}`}>{phaseText[session.phase]}</span></div>
@@ -303,7 +304,7 @@ export default function App() {
         {!programLoadedAt ? !programError && <div className="emptyCard">Загружаем программу…</div> : templates.length ? <div className="templateList">{templates.map((template, index) =>
           <div className="templateMini" key={template.id}>
             <span className="templateOrder">{index + 1}</span>
-            <div className="templateDetails"><strong>{template.name}</strong><small>{completedToday.some(item => item.template_id === template.id) ? 'Завершено сегодня' : `${weekdays[template.weekday]} · ${template.send_time}`}</small></div>
+            <div className="templateDetails"><strong>{template.name}</strong><small>{completedToday.some(item => item.template_id === template.id) ? 'Завершено сегодня' : `${nextWeek?.unit === 'cycle' ? `Дни цикла: ${template.cycle_days.join(', ') || 'не назначены'}` : weekdays[template.weekday]} · ${template.send_time}`}</small></div>
             <button className="roundButton" onClick={() => completedToday.some(item => item.template_id === template.id) ? setTab('history') : startSession(template.id)} aria-label={completedToday.some(item => item.template_id === template.id) ? `Результаты ${template.name}` : `Начать ${template.name}`}>{completedToday.some(item => item.template_id === template.id) ? '✓' : '→'}</button>
           </div>
         )}</div> : <button className="primaryButton" onClick={() => setTab('program')}>Создать программу</button>}

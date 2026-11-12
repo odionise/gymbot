@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import secrets
 from contextlib import asynccontextmanager, suppress
@@ -22,10 +23,10 @@ from .migrations import migrate
 from .models import Exercise, Movement, MuscleTarget, SessionExercise, SetResult, TrainingWeek, User, WeekOverride, WorkoutSession, WorkoutTemplate, new_id, utcnow
 from .history import history_id as exercise_history_id, slot_id, history_options as available_history, movement_is_used, movement_usage
 from .muscles import ALL_DETAILED_GROUPS, DETAILED_GROUPS, VOLUME_TARGET_GROUPS
-from .planning import get_or_create_session, is_reentry, monday, movement_for, planned_counts, recommendation_context, resolve_week, vacation_override
+from .planning import cycle_complete, cycle_schedule, due_cycle_slot, get_or_create_session, is_reentry, monday, movement_for, next_cycle_start, planned_counts, recommendation_context, resolve_week, vacation_override
 from .preview import preview_session
 from .recommendations import recommendation_dict, record_manual_target, save_recommendation
-from .schemas import DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, ProfileIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
+from .schemas import CycleConfigIn, DurationIn, ExerciseIn, MovementIn, MuscleTargetIn, NextWeekIn, OverrideIn, ProfileIn, RecoveryIn, ReplacementIn, RescheduleIn, ResultIn, SessionPreviewOut, SetsCountIn, SettingsIn, SkipIn, TemplateIn, VolumeCapIn
 from .serializers import exercise_dict, movement_dict, session_dict, template_dict
 
 
@@ -160,16 +161,20 @@ def program_user(
 
 
 @app.get("/api/admin/users")
-def admin_users(q: str, actor: User = Depends(current_user), db: Session = Depends(get_db)):
+def admin_users(q: str = "", offset: int = 0, actor: User = Depends(current_user), db: Session = Depends(get_db)):
     if actor.telegram_id != ADMIN_TELEGRAM_ID:
         raise HTTPException(403, "Доступно только администратору")
     query = q.strip().lstrip("@").lower()
-    if len(query) < 3 or len(query) > 32:
-        raise HTTPException(422, "Введите минимум три символа username")
-    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    users = db.scalars(select(User).where(
-        func.lower(User.telegram_username).like(f"%{escaped}%", escape="\\")
-    ).order_by(User.telegram_username).limit(20)).all()
+    if len(query) > 80 or offset < 0:
+        raise HTTPException(422, "Некорректные параметры поиска")
+    stmt = select(User)
+    if query:
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(or_(
+            func.lower(User.telegram_username).like(f"%{escaped}%", escape="\\"),
+            func.lower(User.display_name).like(f"%{escaped}%", escape="\\"),
+        ))
+    users = db.scalars(stmt.order_by(User.created_at, User.telegram_id).offset(offset).limit(50)).all()
     return [{"telegram_id": user.telegram_id, "username": user.telegram_username,
              "display_name": user.display_name} for user in users]
 
@@ -318,6 +323,46 @@ def templates(user: User = Depends(program_user), db: Session = Depends(get_db))
     return [template_dict(item) for item in items]
 
 
+@app.get("/api/program/cycle")
+def program_cycle(user: User = Depends(program_user), db: Session = Depends(get_db)):
+    templates = list(db.scalars(select(WorkoutTemplate).where(
+        WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True))))
+    slots = sorted(({"day": day, "template_id": template.id}
+                    for template in templates for day in json.loads(template.cycle_days_json or "[]")),
+                   key=lambda item: (item["day"], item["template_id"]))
+    return {"length_days": user.cycle_days, "start_date": user.cycle_anchor,
+            "slots": slots}
+
+
+@app.put("/api/program/cycle")
+def update_program_cycle(data: CycleConfigIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
+    locked_row(db, User, User.telegram_id == user.telegram_id)
+    local_today = datetime.now(ZoneInfo(user.timezone)).date()
+    if data.start_date < local_today and data.start_date != user.cycle_anchor:
+        raise HTTPException(422, "Начало нового цикла не может быть в прошлом")
+    if user.cycle_anchor is not None and data.start_date != user.cycle_anchor and db.scalar(select(TrainingWeek.id).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle")):
+        raise HTTPException(409, "После начала программы дату первого цикла менять нельзя")
+    if user.cycle_anchor is None and db.scalar(select(TrainingWeek.id).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.week_start == data.start_date)):
+        raise HTTPException(409, "На выбранную дату уже есть сохранённая фаза. Выберите другую дату начала цикла.")
+    templates = {item.id: item for item in db.scalars(select(WorkoutTemplate).where(
+        WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True)))}
+    if any(slot.template_id not in templates for slot in data.slots):
+        raise HTTPException(422, "В расписании есть чужая или удалённая тренировка")
+    if any(not any(exercise.active for exercise in templates[slot.template_id].exercises) for slot in data.slots):
+        raise HTTPException(422, "В каждой тренировке цикла должно быть хотя бы одно упражнение")
+    days_by_template = {template_id: [] for template_id in templates}
+    for slot in data.slots:
+        days_by_template[slot.template_id].append(slot.day)
+    for template_id, days in days_by_template.items():
+        templates[template_id].cycle_days_json = json.dumps(sorted(days))
+    user.cycle_days = data.length_days
+    user.cycle_anchor = data.start_date
+    db.commit()
+    return program_cycle(user, db)
+
+
 @app.post("/api/templates")
 def create_template(data: TemplateIn, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = WorkoutTemplate(user_id=user.telegram_id, **data.model_dump())
@@ -339,6 +384,12 @@ def update_template(template_id: str, data: TemplateIn, user: User = Depends(pro
 @app.delete("/api/templates/{template_id}")
 def delete_template(template_id: str, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = owned_template(db, user, template_id)
+    active_cycle = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+    ).order_by(TrainingWeek.week_start.desc()))
+    if active_cycle and not cycle_complete(db, active_cycle, datetime.now(ZoneInfo(user.timezone)).date()) \
+            and any(slot["template_id"] == template_id for slot in cycle_schedule(active_cycle)):
+        raise HTTPException(409, "Тренировка входит в текущий цикл. Завершите цикл перед удалением.")
     item.active = False
     db.commit()
     return {"ok": True}
@@ -476,17 +527,25 @@ def replace_exercise(exercise_id: str, data: ReplacementIn, user: User = Depends
 def today_sessions(user: User = Depends(current_user), db: Session = Depends(get_db)):
     locked_row(db, User, User.telegram_id == user.telegram_id)
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
-    if db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
-                                           WeekOverride.week_start == monday(local_date),
-                                           WeekOverride.kind == "vacation")):
-        return []
-    due = db.scalars(select(WorkoutTemplate).where(
-        WorkoutTemplate.user_id == user.telegram_id,
-        WorkoutTemplate.active.is_(True),
-        WorkoutTemplate.weekday == local_date.weekday(),
-    )).all()
-    for template in due:
-        get_or_create_session(db, template, local_date)
+    if user.cycle_days is not None:
+        due = due_cycle_slot(db, user, local_date)
+        if due:
+            slot, due_date = due
+            template = db.get(WorkoutTemplate, slot["template_id"])
+            if template and template.active:
+                get_or_create_session(db, template, due_date, slot["day"])
+    else:
+        if db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
+                                               WeekOverride.week_start == monday(local_date),
+                                               WeekOverride.kind == "vacation")):
+            return []
+        due = db.scalars(select(WorkoutTemplate).where(
+            WorkoutTemplate.user_id == user.telegram_id,
+            WorkoutTemplate.active.is_(True),
+            WorkoutTemplate.weekday == local_date.weekday(),
+        )).all()
+        for template in due:
+            get_or_create_session(db, template, local_date)
     sessions = db.scalars(select(WorkoutSession).where(
         WorkoutSession.user_id == user.telegram_id,
         WorkoutSession.status != "completed",
@@ -499,7 +558,13 @@ def today_sessions(user: User = Depends(current_user), db: Session = Depends(get
 def start_session(template_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     template = owned_template(db, user, template_id)
     local_date = datetime.now(ZoneInfo(user.timezone)).date()
-    session = get_or_create_session(db, template, local_date)
+    if user.cycle_days is not None:
+        due = due_cycle_slot(db, user, local_date)
+        if not due or due[0]["template_id"] != template_id:
+            raise HTTPException(409, "Сейчас очередь другой тренировки или день отдыха")
+        session = get_or_create_session(db, template, due[1], due[0]["day"])
+    else:
+        session = get_or_create_session(db, template, local_date)
     if not session:
         if vacation_override(db, user.telegram_id, local_date) or resolve_week(db, user.telegram_id, local_date).phase_type == "vacation":
             raise HTTPException(409, "На этой неделе отпуск — тренировки приостановлены")
@@ -661,7 +726,7 @@ def complete_session(session_id: str, user: User = Depends(current_user), db: Se
                else len([r for r in item.results if r.is_working]) != item.sets_count) for item in session.exercises):
         raise HTTPException(400, "Record all sets or skip the exercise")
     actual_date = datetime.now(ZoneInfo(user.timezone)).date()
-    if vacation_override(db, user.telegram_id, actual_date):
+    if user.cycle_days is None and vacation_override(db, user.telegram_id, actual_date):
         raise HTTPException(409, "Во время отпуска завершить тренировку нельзя")
     if session.phase_type is not None:
         actual_week = resolve_week(db, user.telegram_id, actual_date)
@@ -700,6 +765,10 @@ def reschedule(session_id: str, data: RescheduleIn, user: User = Depends(current
     if db.scalar(select(WorkoutSession).where(WorkoutSession.template_id == session.template_id,
                                               WorkoutSession.scheduled_date == new_date)):
         raise HTTPException(409, "Workout already exists on that date")
+    if session.week and session.week.period_kind == "cycle":
+        session.scheduled_date = new_date
+        db.commit()
+        return session_dict(session, template)
     if vacation_override(db, user.telegram_id, new_date):
         raise HTTPException(409, "На неделю отпуска нельзя перенести тренировку")
     week = resolve_week(db, user.telegram_id, new_date)
@@ -736,9 +805,21 @@ def next_week_start(user: User) -> date:
     return monday(today) + timedelta(days=7)
 
 
+def next_period_start(db: Session, user: User) -> date:
+    if user.cycle_days is None or user.cycle_anchor is None:
+        return next_week_start(user)
+    latest = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+    ).order_by(TrainingWeek.week_start.desc()))
+    return max(user.cycle_anchor, next_cycle_start(db, latest)) if latest else user.cycle_anchor
+
+
 @app.get("/api/next-week")
 def next_week(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    start = next_week_start(user)
+    start = next_period_start(db, user)
+    if user.cycle_days is not None:
+        return {"week_start": start.isoformat(), "kind": user.next_cycle_override,
+                "unit": "cycle", "length_days": user.cycle_days}
     override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
                                                     WeekOverride.week_start == start))
     return {"week_start": start.isoformat(), "kind": override.kind if override else None}
@@ -758,6 +839,11 @@ def editable_next_week(db: Session, user: User) -> tuple[date, TrainingWeek | No
 
 @app.put("/api/next-week")
 def set_next_week(data: NextWeekIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.cycle_days is not None:
+        locked_row(db, User, User.telegram_id == user.telegram_id)
+        user.next_cycle_override = data.kind
+        db.commit()
+        return next_week(user, db)
     start, week = editable_next_week(db, user)
     override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
                                                     WeekOverride.week_start == start))
@@ -775,6 +861,11 @@ def set_next_week(data: NextWeekIn, user: User = Depends(current_user), db: Sess
 
 @app.delete("/api/next-week")
 def clear_next_week(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if user.cycle_days is not None:
+        locked_row(db, User, User.telegram_id == user.telegram_id)
+        user.next_cycle_override = None
+        db.commit()
+        return next_week(user, db)
     start, week = editable_next_week(db, user)
     override = db.scalar(select(WeekOverride).where(WeekOverride.user_id == user.telegram_id,
                                                     WeekOverride.week_start == start))

@@ -9,7 +9,7 @@ import { ExerciseReplacement } from './ExerciseReplacement'
 import { MovementCatalog, movementKinds, timedOptions } from './MovementCatalog'
 import { filterMovements, normalizeMovementSearch } from './movementSearch'
 import { countWord, formatWeight } from './App'
-import type { Exercise, ExerciseInput, Movement, Template } from './types'
+import type { CycleConfig, Exercise, ExerciseInput, Movement, Template } from './types'
 import { useSubmission } from './useSubmission'
 
 const weekdays = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
@@ -91,6 +91,22 @@ export function ProgramView({ templates, run }: {
   const [catalogLoadedAt, setCatalogLoadedAt] = useState<string | null>(null)
   const [catalogError, setCatalogError] = useState('')
   const [catalogReload, setCatalogReload] = useState(0)
+  const [cycleConfig, setCycleConfig] = useState<CycleConfig | null>(null)
+  const [cycleDays, setCycleDays] = useState(7)
+  const [cycleStart, setCycleStart] = useState('')
+  const [cycleSlots, setCycleSlots] = useState<CycleConfig['slots']>([])
+  const [cycleBusy, setCycleBusy] = useState(false)
+  useEffect(() => {
+    let active = true
+    api.programCycle().then(config => {
+      if (!active) return
+      setCycleConfig(config)
+      setCycleDays(config.length_days ?? 7)
+      setCycleStart(config.start_date ?? new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Moscow' }).format(new Date()))
+      setCycleSlots(config.length_days === null ? templates.map(template => ({ day: template.weekday + 1, template_id: template.id })) : config.slots)
+    }).catch(() => { if (active) setCycleConfig(null) })
+    return () => { active = false }
+  }, [templates])
   useEffect(() => {
     let active = true
     Promise.all([api.movements(), api.muscleGroups()]).then(([items, groups]) => {
@@ -120,6 +136,16 @@ export function ProgramView({ templates, run }: {
       setEditingTemplate(false)
     }))
   }
+  const saveCycle = async (event: FormEvent) => {
+    event.preventDefault()
+    setCycleBusy(true)
+    try {
+      await run(async () => {
+        const config = await api.updateProgramCycle({ length_days: cycleDays, start_date: cycleStart, slots: cycleSlots })
+        setCycleConfig(config)
+      })
+    } finally { setCycleBusy(false) }
+  }
   const deleteTemplate = async () => {
     if (!selected || !window.confirm(`Удалить тренировку «${selected.name}»? История сохранится.`)) return
     await run(async () => { await api.deleteTemplate(selected.id); setSelectedId(null) })
@@ -137,7 +163,7 @@ export function ProgramView({ templates, run }: {
   })
 
   const selectedPanel = selected && !editingTemplate && <section className="programSessionBlock" aria-label={`Настройка тренировки ${selected.name}`}>
-      <div className="programCard"><div className="programCardTop"><span>{weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
+      <div className="programCard"><div className="programCardTop"><span>{cycleConfig?.length_days ? `Дни цикла: ${selected.cycle_days.join(', ') || 'не назначены'}` : weekdays[selected.weekday]} · {selected.send_time}</span><span className="phasePill phase-medium">План накопления</span></div><h2>{selected.name}</h2><p>{selected.muscle_group} · {selected.exercises.length} {countWord(selected.exercises.length, 'упражнение', 'упражнения', 'упражнений')}</p><div className="programActions"><button onClick={() => setEditingTemplate(true)}>Изменить расписание</button><button className="dangerText" onClick={deleteTemplate}>Удалить</button></div></div>
       <div className="sectionHead"><h2>Упражнения</h2><span>{selected.exercises.length}</span></div>
       {selected.exercises.map((exercise, index) => { const movement = movements.find(item => item.id === exercise.movement_id); const expanded = exerciseEditor === exercise.id; const replacing = replacementEditor === exercise.id; return <div className="programExerciseItem" key={exercise.id}>
         <div className="programExercise"><span className="programNumber">{index + 1}</span><div><strong>{movement?.name ?? exercise.name}</strong><small>{movement && movement.kind !== 'strength' ? `${movementKinds[movement.kind]} · ${exercise.duration_minutes ?? '—'} мин` : `${movement ? `${movement.primary_group}${movement.is_anchor ? ' · якорное' : ''}` : 'Укажите мышцу в справочнике'} · ${exercise.sets_count} подхода · ${exercise.rep_min}–${exercise.rep_max} · ${formatWeight(exercise.medium_weight)} кг`}</small></div><button className="dangerText" onClick={() => deleteExercise(exercise)} aria-label={`Удалить ${exercise.name}`}>×</button></div>
@@ -155,6 +181,14 @@ export function ProgramView({ templates, run }: {
     {replacementNotice && <p className="hint" role="status">{replacementNotice}</p>}
     {catalogError && <div className="emptyCard" role="alert"><p>Не удалось загрузить справочник. {catalogError}</p>{catalogLoadedAt && <p>Показана версия от {new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'long' }).format(new Date(catalogLoadedAt))}.</p>}<button className="outlineButton" onClick={() => setCatalogReload(value => value + 1)}>Повторить загрузку справочника</button></div>}
     {!catalogLoadedAt && !catalogError && <p className="hint" role="status">Загружаем справочник упражнений…</p>}
+    {templates.length > 0 && <form className="editorPanel cycleEditor" onSubmit={saveCycle}>
+      <div className="editorTitle"><h2>Тренировочный цикл</h2></div>
+      <p className="intro">Три полностью завершённых цикла накопления, затем один лёгкий цикл. Пропуск или перенос не переключает фазу.</p>
+      <div className="fieldGrid"><label className="field"><span>Длина цикла, дней</span><input type="number" min={2} max={30} value={cycleDays} onChange={event => setCycleDays(Number(event.target.value))} required /></label><label className="field"><span>Начало первого или следующего цикла</span><input type="date" value={cycleStart} onChange={event => setCycleStart(event.target.value)} required /></label></div>
+      <div className="cycleSlots">{cycleSlots.map((slot, index) => <div className="cycleSlot" key={index}><label className="field"><span>День</span><input type="number" min={1} max={cycleDays} value={slot.day} onChange={event => setCycleSlots(items => items.map((item, i) => i === index ? { ...item, day: Number(event.target.value) } : item))} /></label><ChoiceDropdown label="Тренировка" value={slot.template_id} options={templates.map(template => ({ value: template.id, label: template.name }))} onChange={value => setCycleSlots(items => items.map((item, i) => i === index ? { ...item, template_id: value } : item))} /><button type="button" className="textButton" onClick={() => setCycleSlots(items => items.filter((_, i) => i !== index))} aria-label={`Удалить занятие ${index + 1}`}>×</button></div>)}</div>
+      <button type="button" className="outlineButton" disabled={cycleSlots.length >= 30} onClick={() => setCycleSlots(items => [...items, { day: Math.min(cycleDays, (items.at(-1)?.day ?? 0) + 1), template_id: templates[0].id }])}>+ Занятие в цикле</button>
+      <button className="primaryButton" type="submit" disabled={cycleBusy || cycleSlots.length === 0}>{cycleBusy ? 'Сохраняем…' : 'Сохранить цикл'}</button>
+    </form>}
     <div className="programPicker" aria-label="Тренировки программы">
       {templates.map(item => <Fragment key={item.id}>
         <button type="button" className={selectedId === item.id ? 'chosen' : ''} aria-expanded={selectedId === item.id} onClick={() => {
@@ -164,7 +198,7 @@ export function ProgramView({ templates, run }: {
           setExerciseEditor(null)
           setReplacementEditor(null)
           setReplacementNotice('')
-        }}><span className="programTileName">{item.name}</span><span className="programTileMeta">{weekdays[item.weekday]} · {item.send_time}</span></button>
+        }}><span className="programTileName">{item.name}</span><span className="programTileMeta">{cycleConfig?.length_days ? `Дни ${item.cycle_days.join(', ') || '—'}` : weekdays[item.weekday]} · {item.send_time}</span></button>
         {selectedId === item.id && selectedPanel && <div className="programExpand" key={`details-${item.id}`}>{selectedPanel}</div>}
       </Fragment>)}
       <button type="button" className={creating ? 'chosen addProgram' : 'addProgram'} aria-label="Новая тренировка" aria-expanded={creating} onClick={() => {
@@ -185,7 +219,8 @@ export function ProgramView({ templates, run }: {
       <div className="editorTitle"><h2>{editingTemplate ? 'Изменить тренировку' : 'Новая тренировка'}</h2>{editingTemplate && <button type="button" onClick={() => setEditingTemplate(false)}>×</button>}</div>
       <label className="field"><span>Название тренировки</span><input required maxLength={120} value={name} placeholder="Например, Грудь и трицепс" onChange={event => setName(event.target.value)} /></label>
       <div className="groupField"><span className="filterLabel">Разделы тренировки</span>{selectedGroups.length > 0 && <div className="groupChips">{selectedGroups.map(group => <button type="button" key={group} onClick={() => setSelectedGroups(selectedGroups.filter(item => item !== group))} aria-label={`Убрать раздел ${group}`}>{group}<IconX size={15} stroke={1.8} aria-hidden="true" /></button>)}</div>}{suggestedGroups.some(group => !selectedGroups.includes(group)) ? <ChoiceDropdown label="Разделы тренировки" hideLabel value="" options={suggestedGroups.filter(group => !selectedGroups.includes(group)).map(group => ({ value: group, label: group }))} placeholder="+ Добавить раздел" onChange={group => { setSelectedGroups([...selectedGroups, group]); setGroupError('') }} /> : <div className="allGroupsSelected">Все разделы выбраны</div>}{groupError && <small className="fieldError" role="alert">{groupError}</small>}</div>
-      <div className="fieldGrid scheduleFields"><ChoiceDropdown label="День недели" value={String(weekday)} options={weekdays.map((day, index) => ({ value: String(index), label: day }))} onChange={value => setWeekday(Number(value))} /><TimePicker label="Начало тренировки" value={sendTime} onChange={setSendTime} /></div>
+      <div className="fieldGrid scheduleFields">{!cycleConfig?.length_days && <ChoiceDropdown label="День недели" value={String(weekday)} options={weekdays.map((day, index) => ({ value: String(index), label: day }))} onChange={value => setWeekday(Number(value))} />}<TimePicker label="Начало тренировки" value={sendTime} onChange={setSendTime} /></div>
+      {cycleConfig?.length_days && <p className="intro">Дни этой тренировки назначаются в блоке «Тренировочный цикл».</p>}
       <button className="primaryButton" type="submit">Сохранить тренировку</button>
     </fieldset></form>}
     {catalogLoadedAt && <MovementCatalog movements={movements} detailGroups={detailGroups} refreshMovements={async () => setMovements(await api.movements())} run={run} />}

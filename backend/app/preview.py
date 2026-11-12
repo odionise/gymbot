@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .history import history_id, slot_id
 from .models import Movement, User, WorkoutSession, WorkoutTemplate, utcnow
 from .muscles import ALL_DETAILED_GROUPS
-from .planning import is_reentry, monday, planned_counts, project_week, recommendation_context, vacation_override
+from .planning import is_reentry, monday, planned_counts, project_due_cycle_slot, project_week, recommendation_context, vacation_override
 
 
 def configured_movements(db: Session, user_id: int, selected: WorkoutTemplate) -> tuple[dict, list]:
@@ -98,6 +98,12 @@ def preview_session(db: Session, user_id: int, template_id: str, on_date: date) 
         result.update(state="existing", existing_session={"id": existing.id,
                       "scheduled_date": existing.scheduled_date.isoformat(), "status": existing.status})
         return result
+    if user.cycle_days is not None and user.cycle_anchor and on_date >= user.cycle_anchor:
+        due = project_due_cycle_slot(db, user, on_date)
+        if due is None or due[0]["template_id"] != template_id or due[1] != on_date:
+            result["blocking_reasons"] = [{"code": "cycle_schedule",
+                "message": "Сначала завершите предыдущее занятие цикла или выберите дату очередного занятия."}]
+            return result
     exercises = [item for item in template.exercises if item.active]
     if not exercises:
         result["blocking_reasons"] = [{"code": "empty_program", "message": "В этом дне программы нет активных упражнений."}]

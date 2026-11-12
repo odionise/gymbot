@@ -5,7 +5,7 @@ import { anatomyPaths } from './anatomyPaths'
 
 type Zone = 'chest' | 'upperChest' | 'traps' | 'lats' | 'teresMajor' | 'teresMinor' |
   'rhomboids' | 'erectors' | 'frontDelts' | 'sideDelts' | 'rearDelts' | 'abs' | 'obliques' |
-  'biceps' | 'triceps' | 'forearms' | 'quads' | 'hamstrings' | 'glutes' | 'gastro' | 'soleus'
+  'biceps' | 'triceps' | 'forearms' | 'quads' | 'adductors' | 'hamstrings' | 'glutes' | 'gastro' | 'soleus'
 
 const regions: Record<string, Zone[]> = {
   'Грудь': ['chest', 'upperChest'], 'Верх груди': ['upperChest'],
@@ -16,7 +16,7 @@ const regions: Record<string, Zone[]> = {
   'Передние дельты': ['frontDelts'], 'Средние дельты': ['sideDelts'], 'Задние дельты': ['rearDelts'],
   'Пресс': ['abs'], 'Косые мышцы живота': ['obliques'],
   'Бицепс': ['biceps'], 'Трицепс': ['triceps'], 'Предплечья': ['forearms'],
-  'Квадрицепс': ['quads'], 'Бицепс бедра': ['hamstrings'], 'Задняя поверхность бедра': ['hamstrings'],
+  'Квадрицепс': ['quads'], 'Приводящие мышцы': ['adductors'], 'Бицепс бедра': ['hamstrings'], 'Задняя поверхность бедра': ['hamstrings'],
   'Ягодичные': ['glutes'], 'Икры': ['gastro', 'soleus'], 'Икроножные': ['gastro'],
   'Камбаловидные': ['soleus'],
 }

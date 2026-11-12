@@ -1,9 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from './api'
 import { ProgramView } from './ProgramView'
 import type { Template } from './types'
 
-type AdminUser = { telegram_id: number; username: string; display_name: string | null }
+type AdminUser = { telegram_id: number; username: string | null; display_name: string | null }
 
 export function AdminView() {
   const [query, setQuery] = useState('')
@@ -12,13 +12,26 @@ export function AdminView() {
   const [templates, setTemplates] = useState<Template[]>([])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
   useEffect(() => () => api.setAdminTarget(null), [])
-  const search = async (event: FormEvent) => {
-    event.preventDefault()
-    setError('')
-    setBusy(true)
-    try { setMatches(await api.adminUsers(query.trim().replace(/^@/, ''))) }
-    catch (err) { setError((err as Error).message) }
+  useEffect(() => {
+    let active = true
+    const timer = window.setTimeout(async () => {
+      setError(''); setBusy(true)
+      try {
+        const users = await api.adminUsers(query.trim().replace(/^@/, ''))
+        if (active) { setMatches(users); setHasMore(users.length === 50) }
+      } catch (err) { if (active) setError((err as Error).message) }
+      finally { if (active) setBusy(false) }
+    }, query ? 250 : 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [query])
+  const loadMore = async () => {
+    setBusy(true); setError('')
+    try {
+      const users = await api.adminUsers(query.trim().replace(/^@/, ''), matches.length)
+      setMatches(previous => [...previous, ...users]); setHasMore(users.length === 50)
+    } catch (err) { setError((err as Error).message) }
     finally { setBusy(false) }
   }
   const open = async (user: AdminUser) => {
@@ -37,19 +50,21 @@ export function AdminView() {
   }
   return <section className="adminView">
     {selected ? <>
-      <button className="backButton" type="button" onClick={leave}>← <span>К поиску</span></button>
+      <button className="backButton" type="button" onClick={leave}>← <span>К списку</span></button>
       <span className="adminEyebrow">Программа пользователя</span>
-      <h1>@{selected.username}</h1>
+      <h1>{selected.username ? `@${selected.username}` : selected.display_name || `ID ${selected.telegram_id}`}</h1>
       {selected.display_name && <p className="intro">{selected.display_name}</p>}
       {error && <p className="adminError" role="alert">{error}</p>}
       <ProgramView templates={templates} run={run} />
     </> : <>
       <span className="adminEyebrow">Управление программами</span>
       <h1>Пользователи</h1>
-      <p className="intro">Найдите пользователя по Telegram username и откройте его программу.</p>
-      <form className="adminSearch" onSubmit={search}><label className="field"><span>Telegram username</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="@username" autoComplete="off" /></label><button className="primaryButton" type="submit" disabled={busy || query.trim().replace(/^@/, '').length < 3}>Найти</button></form>
+      <p className="intro">Все пользователи бота. Поиск по username или имени.</p>
+      <div className="adminSearch"><label className="field"><span>Поиск пользователя</span><input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="@username или имя" autoComplete="off" /></label></div>
       {error && <p className="adminError" role="alert">{error}</p>}
-      <div className="adminMatches">{matches.map(user => <button type="button" key={user.telegram_id} onClick={() => open(user)}><span><strong>@{user.username}</strong>{user.display_name && <small>{user.display_name}</small>}</span><span aria-hidden="true">→</span></button>)}</div>
+      <div className="adminMatches">{matches.map(user => <button type="button" key={user.telegram_id} onClick={() => open(user)}><span><strong>{user.username ? `@${user.username}` : user.display_name || `ID ${user.telegram_id}`}</strong><small>{user.username ? user.display_name : `Telegram ID ${user.telegram_id}`}</small></span><span aria-hidden="true">→</span></button>)}</div>
+      {!busy && !error && matches.length === 0 && <p className="intro">Пользователи не найдены.</p>}
+      {hasMore && <button className="outlineButton" type="button" disabled={busy} onClick={loadMore}>{busy ? 'Загружаем…' : 'Показать ещё'}</button>}
     </>}
   </section>
 }

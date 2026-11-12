@@ -56,7 +56,7 @@ def test_version_five_upgrade_and_backup_restore_preserve_facts_and_unknown_cont
             migrate(legacy_engine)
             assert legacy_rows(legacy_engine, old_data) == facts_before
             with legacy_engine.connect() as connection:
-                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5, 6, 7, 8]
+                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == list(range(1, 10))
                 assert connection.execute(text("SELECT recommendation_context_json FROM session_exercises")).scalar() is None
                 assert connection.execute(text("SELECT weight_step FROM session_exercises")).scalar() is None
                 assert connection.execute(text("SELECT rir_target FROM exercises")).scalar() == 0

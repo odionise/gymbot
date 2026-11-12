@@ -26,6 +26,9 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(String(80))
     birth_date: Mapped[date | None] = mapped_column(Date)
     telegram_username: Mapped[str | None] = mapped_column(String(32), index=True)
+    cycle_days: Mapped[int | None] = mapped_column(Integer)
+    cycle_anchor: Mapped[date | None] = mapped_column(Date)
+    next_cycle_override: Mapped[str | None] = mapped_column(String(16))
 
 
 class WorkoutTemplate(Base):
@@ -36,6 +39,7 @@ class WorkoutTemplate(Base):
     muscle_group: Mapped[str] = mapped_column(String(120))
     weekday: Mapped[int] = mapped_column(Integer)
     send_time: Mapped[str] = mapped_column(String(5), default="09:00")
+    cycle_days_json: Mapped[str] = mapped_column(Text, default="[]")
     next_phase: Mapped[int] = mapped_column(Integer, default=0)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     exercises: Mapped[list["Exercise"]] = relationship(back_populates="template", order_by=lambda: (Exercise.position, func.coalesce(Exercise.slot_id, Exercise.id)))
@@ -121,6 +125,9 @@ class TrainingWeek(Base):
     feeling_beat_up: Mapped[bool] = mapped_column(Boolean, default=False)
     target_rir: Mapped[float] = mapped_column(Numeric(3, 1))
     targets_json: Mapped[str] = mapped_column(String(4000), default="{}")
+    period_kind: Mapped[str] = mapped_column(String(8), default="week")
+    period_days: Mapped[int] = mapped_column(Integer, default=7)
+    schedule_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
 class WeekOverride(Base):
@@ -147,6 +154,7 @@ class WorkoutSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     actual_date: Mapped[date | None] = mapped_column(Date)
     week_id: Mapped[str | None] = mapped_column(ForeignKey("training_weeks.id"))
+    cycle_day: Mapped[int | None] = mapped_column(Integer)
     phase_type: Mapped[str | None] = mapped_column(String(16))
     week: Mapped["TrainingWeek | None"] = relationship()
     exercises: Mapped[list["SessionExercise"]] = relationship(back_populates="session", order_by="SessionExercise.position", cascade="all, delete-orphan")

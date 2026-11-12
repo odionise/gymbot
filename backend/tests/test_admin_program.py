@@ -13,6 +13,10 @@ def test_only_named_admin_can_search_and_edit_other_programs(client, database, c
     search = client.get('/api/admin/users?q=lifter', headers=admin)
     assert search.status_code == 200
     assert [item['telegram_id'] for item in search.json()] == [833001]
+    whole_list = client.get('/api/admin/users', headers=admin)
+    assert whole_list.status_code == 200
+    assert {item['telegram_id'] for item in whole_list.json()} >= {5540948403, 833001}
+    assert client.get('/api/admin/users', headers=stranger).status_code == 403
     assert client.get('/api/admin/users?q=lifter', headers=stranger).status_code == 403
     target = {'X-Admin-Target-User-Id': '833001'}
     assert client.get('/api/templates', headers={**stranger, **target}).status_code == 403

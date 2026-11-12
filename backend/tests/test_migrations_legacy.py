@@ -169,7 +169,7 @@ def test_complete_legacy_graph_survives_migration_and_reapplication(legacy_engin
         migrate(legacy_engine)
         assert legacy_rows(legacy_engine, metadata) == before
         with legacy_engine.connect() as connection:
-            assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5, 6, 7, 8]
+            assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == list(range(1, 10))
             assert list(connection.execute(text("SELECT rir_reported, rir_target FROM set_results"))) == [(None, None), (None, None)]
             assert connection.execute(text("SELECT movement_id FROM session_exercises")).scalar() is None
             assert connection.execute(text("SELECT actual_date FROM workout_sessions")).scalar() is None
@@ -255,6 +255,6 @@ def test_version_four_upgrade_preserves_existing_facts_and_unknown_step(legacy_e
                 assert all(identity == slot == history_id for identity, slot, history_id in rows)
                 assert connection.execute(text("SELECT weight_step FROM session_exercises")).scalar() is None
                 assert connection.execute(text("SELECT recommendation_context_json FROM session_exercises")).scalar() is None
-                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == [1, 2, 3, 4, 5, 6, 7, 8]
+                assert list(connection.execute(text("SELECT version FROM schema_versions ORDER BY version")).scalars()) == list(range(1, 10))
             assert any(item["unique"] and item["column_names"] == ["slot_id"]
                        for item in inspect(legacy_engine).get_indexes("exercises"))

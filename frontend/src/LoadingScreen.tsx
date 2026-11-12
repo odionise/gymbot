@@ -1,8 +1,8 @@
 export function LoadingScreen() {
-  return <div className="bootLoader" role="status" aria-label="Загружаем тренировку">
+  return <div className="bootLoader" role="status" aria-label="Загружаем тренировки">
     <div className="bootPlate" aria-hidden="true">
       <img src="/images/plate-25-v2.png" alt="" width="128" height="128" />
     </div>
-    <span className="bootLoaderText">Загружаем тренировку</span>
+    <span className="bootLoaderText" aria-hidden="true"><span>Загружаем тренировки...</span><span>Готовим статистику...</span><span>Считаем подходы...</span><span>Корректируем программу...</span></span>
   </div>
 }

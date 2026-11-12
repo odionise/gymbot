@@ -1,3 +1,5 @@
+import json
+
 from .models import Exercise, Movement, SessionExercise, WorkoutSession, WorkoutTemplate
 from .history import history_id, slot_id
 from .muscles import split_details
@@ -31,6 +33,7 @@ def template_dict(item: WorkoutTemplate) -> dict:
     return {
         "id": item.id, "name": item.name, "muscle_group": item.muscle_group,
         "weekday": item.weekday, "send_time": item.send_time,
+        "cycle_days": json.loads(item.cycle_days_json or "[]"),
         "exercises": [exercise_dict(exercise) for exercise in item.exercises if exercise.active],
     }
 
@@ -72,6 +75,9 @@ def session_dict(item: WorkoutSession, template: WorkoutTemplate) -> dict:
         "week_id": item.week_id,
         "week_start": item.week.week_start.isoformat() if item.week else None,
         "week_number": item.week.week_number if item.week else None,
+        "period_kind": item.week.period_kind if item.week else "week",
+        "period_days": item.week.period_days if item.week else 7,
+        "cycle_day": item.cycle_day,
         "deload_reason": item.week.deload_reason if item.week else None,
         "feeling_beat_up": item.week.feeling_beat_up if item.week else False,
         "status": item.status,

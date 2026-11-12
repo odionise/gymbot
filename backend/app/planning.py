@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -33,6 +33,9 @@ class WeekState:
     feeling_beat_up: bool
     target_rir: float
     targets_json: str
+    period_kind: str = "week"
+    period_days: int = 7
+    schedule_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,10 @@ def monday(day: date) -> date:
 
 
 def vacation_override(db: Session, user_id: int, on_date: date) -> bool:
+    user = db.get(User, user_id)
+    if user and user.cycle_days is not None and user.cycle_anchor and on_date >= user.cycle_anchor:
+        plan = project_cycle(db, user, on_date)
+        return plan.week.week_start <= on_date and plan.week.phase_type == "vacation"
     return db.scalar(select(WeekOverride.id).where(
         WeekOverride.user_id == user_id, WeekOverride.week_start == monday(on_date),
         WeekOverride.kind == "vacation",
@@ -82,12 +89,15 @@ def movement_for(db: Session, exercise: Exercise, user_id: int) -> Movement:
     return movement
 
 
-def completed_new(db: Session, user_id: int, start: date | None = None) -> list[WorkoutSession]:
+def completed_new(db: Session, user_id: int, start: date | None = None,
+                  period: TrainingWeek | WeekState | None = None) -> list[WorkoutSession]:
     query = select(WorkoutSession).where(
         WorkoutSession.user_id == user_id, WorkoutSession.status == "completed",
         WorkoutSession.phase_type.is_not(None),
     )
-    if start is not None:
+    if period is not None and period.period_kind == "cycle":
+        query = query.where(WorkoutSession.week_id == period.id)
+    elif start is not None:
         query = query.where(WorkoutSession.actual_date >= start,
                             WorkoutSession.actual_date < start + timedelta(days=7))
     return list(db.scalars(query.options(
@@ -97,7 +107,9 @@ def completed_new(db: Session, user_id: int, start: date | None = None) -> list[
 
 
 def week_stats(db: Session, user_id: int, start: date) -> dict:
-    sessions = completed_new(db, user_id, start)
+    period = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user_id, TrainingWeek.week_start == start))
+    sessions = completed_new(db, user_id, start, period)
     hard, working = defaultdict(float), defaultdict(float)
     rir = []
     for session in sessions:
@@ -146,7 +158,7 @@ def missed_deload_value(db: Session, week: TrainingWeek | WeekState | None) -> b
     actual = sum(week_stats(db, week.user_id, week.week_start)["working"].values())
     earlier = list(db.scalars(select(TrainingWeek).where(
         TrainingWeek.user_id == week.user_id, TrainingWeek.week_start < week.week_start,
-        TrainingWeek.phase_type == "accumulation",
+        TrainingWeek.phase_type == "accumulation", TrainingWeek.period_kind == week.period_kind,
     ).order_by(TrainingWeek.week_start.desc()).limit(2)))
     baselines = [sum(week_stats(db, week.user_id, item.week_start)["working"].values()) for item in earlier]
     return bool(baselines and median(baselines) > 0 and actual >= 0.8 * median(baselines))
@@ -158,6 +170,135 @@ def mark_missed_deload(db: Session, week: TrainingWeek | None) -> None:
         week.missed_deload = value
 
 
+def cycle_schedule(week: TrainingWeek | WeekState) -> list[dict]:
+    return sorted(json.loads(week.schedule_json or "[]"),
+                  key=lambda slot: (slot["day"], slot["template_id"]))
+
+
+def cycle_sessions(db: Session, week: TrainingWeek | WeekState) -> list[WorkoutSession]:
+    return list(db.scalars(select(WorkoutSession).where(
+        WorkoutSession.user_id == week.user_id, WorkoutSession.week_id == week.id)))
+
+
+def cycle_complete(db: Session, week: TrainingWeek | WeekState, on_date: date) -> bool:
+    if week.phase_type == "vacation":
+        return on_date >= week.week_start + timedelta(days=week.period_days)
+    completed = {(item.cycle_day, item.template_id) for item in cycle_sessions(db, week)
+                 if item.status == "completed"}
+    schedule = cycle_schedule(week)
+    return bool(schedule) and all((slot["day"], slot["template_id"]) in completed for slot in schedule)
+
+
+def next_cycle_start(db: Session, week: TrainingWeek | WeekState) -> date:
+    earliest = week.week_start + timedelta(days=week.period_days)
+    schedule = cycle_schedule(week)
+    completed = [item for item in cycle_sessions(db, week) if item.status == "completed"]
+    if not schedule or not completed:
+        return earliest
+    final_day = max(slot["day"] for slot in schedule)
+    last_actual = max((item.actual_date or item.scheduled_date) for item in completed)
+    return max(earliest, last_actual + timedelta(days=week.period_days - final_day + 1))
+
+
+def project_cycle(db: Session, user: User, on_date: date) -> WeekPlan:
+    latest = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+        TrainingWeek.week_start <= on_date,
+    ).order_by(TrainingWeek.week_start.desc()))
+    if latest and not cycle_complete(db, latest, on_date):
+        prior_item = db.scalar(select(TrainingWeek).where(
+            TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+            TrainingWeek.week_start < latest.week_start,
+        ).order_by(TrainingWeek.week_start.desc()))
+        before_item = db.scalar(select(TrainingWeek).where(
+            TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+            TrainingWeek.week_start < prior_item.week_start,
+        ).order_by(TrainingWeek.week_start.desc())) if prior_item else None
+        return WeekPlan(week_state(latest), week_state(prior_item) if prior_item else None,
+                        week_state(before_item) if before_item else None, "saved")
+    last_training = (latest if latest and latest.phase_type != "vacation" else
+                     db.scalar(select(TrainingWeek).where(
+                         TrainingWeek.user_id == user.telegram_id,
+                         TrainingWeek.period_kind == "cycle",
+                         TrainingWeek.phase_type != "vacation",
+                         TrainingWeek.week_start < latest.week_start,
+                     ).order_by(TrainingWeek.week_start.desc())) if latest else None)
+    prior = week_state(last_training) if last_training else None
+    start = max(user.cycle_anchor, next_cycle_start(db, latest)) if latest else user.cycle_anchor
+    before_item = db.scalar(select(TrainingWeek).where(
+        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
+        TrainingWeek.week_start < prior.week_start,
+    ).order_by(TrainingWeek.week_start.desc())) if prior else None
+    before_prior = week_state(before_item) if before_item else None
+    missed = missed_deload_value(db, prior)
+    if missed is not None:
+        prior = replace(prior, missed_deload=missed)
+    number = 1 if prior is None or prior.phase_type == "deload" else prior.week_number + 1
+    override_kind = user.next_cycle_override
+    if override_kind == "vacation":
+        phase, reason = "vacation", None
+        number = prior.week_number if prior else 0
+    else:
+        phase = "deload" if override_kind == "deload" or number == 4 else "accumulation"
+        reason = "manual" if override_kind == "deload" else "scheduled" if phase == "deload" else None
+    saved_targets = {item.muscle_group: item for item in db.scalars(select(MuscleTarget).where(
+        MuscleTarget.user_id == user.telegram_id))}
+    targets = {group: [item.min_sets, item.max_sets, item.cap_sets]
+               for group, item in saved_targets.items()}
+    templates = list(db.scalars(select(WorkoutTemplate).where(
+        WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True))))
+    schedule = sorted(({"day": day, "template_id": template.id}
+                       for template in templates for day in json.loads(template.cycle_days_json or "[]")),
+                      key=lambda slot: (slot["day"], slot["template_id"]))
+    new_block = None
+    if number == 1 and (prior is None or prior.phase_type == "deload"):
+        last_block = db.scalar(select(Mesocycle.block_number).where(
+            Mesocycle.user_id == user.telegram_id).order_by(Mesocycle.block_number.desc())) or 0
+        new_block = last_block + 1
+    week = WeekState(None, user.telegram_id, None if new_block else prior.mesocycle_id if prior else latest.mesocycle_id if latest else None,
+                     start, number, phase, reason, False, False, False,
+                     4 if phase == "deload" else 2 if phase == "accumulation" else 0,
+                     json.dumps(targets, ensure_ascii=False), "cycle", user.cycle_days,
+                     json.dumps(schedule))
+    return WeekPlan(week, prior, before_prior, "calculated", new_block, missed)
+
+
+def project_due_cycle_slot(db: Session, user: User, on_date: date) -> tuple[dict, date] | None:
+    if user.cycle_days is None or user.cycle_anchor is None or on_date < user.cycle_anchor:
+        return None
+    plan = project_cycle(db, user, on_date)
+    week = plan.week
+    if week.week_start > on_date:
+        return None
+    if week.phase_type == "vacation":
+        return None
+    completed = {(item.cycle_day, item.template_id): item for item in cycle_sessions(db, week)
+                 if item.status == "completed"} if week.id else {}
+    prior_slot = None
+    for slot in cycle_schedule(week):
+        key = (slot["day"], slot["template_id"])
+        if key in completed:
+            prior_slot = (slot, completed[key])
+            continue
+        due = week.week_start + timedelta(days=slot["day"] - 1)
+        if prior_slot:
+            previous, session = prior_slot
+            due = max(due, (session.actual_date or session.scheduled_date)
+                      + timedelta(days=slot["day"] - previous["day"]))
+        return (slot, due) if due <= on_date else None
+    return None
+
+
+def due_cycle_slot(db: Session, user: User, on_date: date) -> tuple[dict, date] | None:
+    """Writable calendar path; persist a selected vacation before returning."""
+    if user.cycle_days is not None and user.cycle_anchor and on_date >= user.cycle_anchor:
+        plan = project_cycle(db, user, on_date)
+        if plan.week.week_start <= on_date and plan.week.phase_type == "vacation" and plan.source == "calculated":
+            resolve_week(db, user.telegram_id, on_date)
+            db.commit()
+    return project_due_cycle_slot(db, user, on_date)
+
+
 def project_week(db: Session, user_id: int, on_date: date) -> WeekPlan:
     """Resolve the same calendar decision as creation, using only SELECTs.
 
@@ -165,6 +306,9 @@ def project_week(db: Session, user_id: int, on_date: date) -> WeekPlan:
     must affect counts and reentry without mutating the persisted prior week.
     Missing calendar weeks are not simulated as hypothetical workouts.
     """
+    user = db.get(User, user_id)
+    if user.cycle_days is not None and user.cycle_anchor is not None and on_date >= user.cycle_anchor:
+        return project_cycle(db, user, on_date)
     start = monday(on_date)
     existing = db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start == start))
@@ -236,6 +380,8 @@ def resolve_week(db: Session, user_id: int, on_date: date) -> TrainingWeek:
     week = TrainingWeek(**values)
     db.add(week)
     db.flush()
+    if week.period_kind == "cycle":
+        db.get(User, user_id).next_cycle_override = None
     return week
 
 
@@ -336,6 +482,9 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
                    movement_map: dict[str, Movement] | None = None) -> dict[str, int]:
     templates = list(db.scalars(select(WorkoutTemplate).where(
         WorkoutTemplate.user_id == user_id, WorkoutTemplate.active.is_(True))))
+    frequencies = Counter(slot["template_id"] for slot in cycle_schedule(week)) if week.period_kind == "cycle" else None
+    if frequencies is not None:
+        templates = [template for template in templates if frequencies[template.id]]
     def lookup(e: Exercise) -> Movement:
         return movement_map[e.id] if movement_map is not None else movement_for(db, e, user_id)
     exercises = [e for t in templates for e in t.exercises if e.active and lookup(e).kind == "strength"]
@@ -347,18 +496,22 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
             item.update(reason_code=code, reason=reason)
     movements = {e.id: lookup(e) for e in exercises}
     def volume(group: str) -> float:
-        return sum(counts[e.id] * (1 if volume_group(movements[e.id].primary_group) == group else
+        return sum(counts[e.id] * (frequencies[e.template_id] if frequencies is not None else 1) *
+                   (1 if volume_group(movements[e.id].primary_group) == group else
                    0.5 if group in {volume_group(g) for g in split_details(movements[e.id].secondary_groups)} else 0)
                    for e in exercises)
     groups = ({volume_group(m.primary_group) for m in movements.values() if m.primary_group != "Не назначено"}
               | {volume_group(group) for m in movements.values() for group in split_details(m.secondary_groups)})
     targets = json.loads(week.targets_json or "{}")
     default_cap = db.get(User, user_id).volume_cap
+    scale = week.period_days / 7 if week.period_kind == "cycle" else 1
+    def cap(group: str, deload: bool) -> int:
+        return max(1, round((8 if deload else targets.get(group, [12, 18, default_cap])[2]) * scale))
     def enforce_limits(deload: bool = False) -> dict[str, int]:
         before_counts = counts.copy()
         before_volumes = {group: volume(group) for group in groups}
         for group in sorted(groups):
-            limit = 8 if deload else targets.get(group, [12, 18, default_cap])[2]
+            limit = cap(group, deload)
             candidates = sorted((e for e in exercises if volume_group(movements[e.id].primary_group) == group
                                  or group in {volume_group(g) for g in split_details(movements[e.id].secondary_groups)}),
                                  key=lambda e: (movements[e.id].is_anchor, -counts[e.id], slot_id(e)))
@@ -371,30 +524,30 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
                 own_groups = {volume_group(g) for g in (movement.primary_group, *split_details(movement.secondary_groups))} & groups
                 item = {**trace[e.id], "value": counts[e.id], "before_limits": before_counts[e.id],
                         "limited": counts[e.id] != before_counts[e.id],
-                        "limits": [{"group": group, "cap": 8 if deload else targets.get(group, [12, 18, default_cap])[2],
+                        "limits": [{"group": group, "cap": cap(group, deload),
                                     "before": before_volumes[group], "after": volume(group)} for group in sorted(own_groups)]}
                 if item["limited"]:
-                    item["reason"] += " Число уменьшено до недельных пределов нагрузки мышц; учитываются также вторичные мышцы."
+                    item["reason"] += " Число уменьшено до предела нагрузки мышц за цикл; учитываются также вторичные мышцы."
                 details[e.id] = item
         return counts
     if week.phase_type == "deload":
         counts = {e.id: max(1, round(e.sets_count * 0.5)) for e in exercises}
-        explain("deload", "Лёгкая неделя: половина базовых подходов с округлением к ближайшему целому (половины к чётному), минимум один; недельный предел 8 на мышцу.")
+        explain("deload", "Лёгкий цикл: половина базовых подходов с округлением к ближайшему целому (половины к чётному), минимум один; предел нагрузки пересчитан на длину цикла.")
         return enforce_limits(deload=True)
     prior = week_plan.prior if week_plan is not None else db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < week.week_start,
-        TrainingWeek.phase_type != "vacation",
+        TrainingWeek.phase_type != "vacation", TrainingWeek.period_kind == week.period_kind,
     ).order_by(TrainingWeek.week_start.desc()))
     if prior and prior.phase_type == "deload" and not prior.missed_deload:
         counts = {e.id: min(e.sets_count, max(1, round(e.sets_count * 0.5) + 1)) for e in exercises}
         explain("reentry", "Возвращение: половина базовых подходов с округлением плюс один, не больше базового числа.")
         return enforce_limits()
     if week.week_number < 2 or not prior:
-        explain("base", "Начало блока или нет предыдущей тренировочной недели: базовые подходы.")
+        explain("base", "Начало блока или нет предыдущего завершённого цикла: базовые подходы.")
         return enforce_limits()
     before_prior = week_plan.before_prior if week_plan is not None else db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < prior.week_start,
-        TrainingWeek.phase_type != "vacation",
+        TrainingWeek.phase_type != "vacation", TrainingWeek.period_kind == week.period_kind,
     ).order_by(TrainingWeek.week_start.desc()))
     if week.week_number == 2 and before_prior and before_prior.phase_type == "deload" and not before_prior.missed_deload:
         explain("reentry_hold", "Вторая неделя после разгрузки: базовые подходы без недельной прибавки.")
@@ -407,11 +560,13 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
             explain("recovery_hold", "На предыдущей неделе отмечено тяжело/болит: базовые подходы без роста.")
         return enforce_limits()
     stats = week_stats(db, user_id, prior.week_start)
-    completed_templates = {s.template_id for s in stats["sessions"]}
+    completed_templates = {(s.template_id, s.cycle_day) for s in stats["sessions"]} if frequencies is not None else {s.template_id for s in stats["sessions"]}
     decline = declining_anchor(db, user_id)
-    missing_days = [t.id for t in templates if t.id not in completed_templates]
+    missing_days = ([slot for slot in cycle_schedule(week_plan.prior if week_plan and week_plan.prior else prior)
+                     if (slot["template_id"], slot["day"]) not in completed_templates]
+                    if frequencies is not None else [t.id for t in templates if t.id not in completed_templates])
     if stats["avg_rir"] is None or stats["avg_rir"] < 1 or decline or missing_days:
-        explain("insufficient_week", "Недельная прибавка не разрешена: неизвестен/низок средний ПДО, снижается якорное упражнение или завершены не все дни. Используются базовые подходы.")
+        explain("insufficient_week", "Прибавка за цикл не разрешена: неизвестен/низок средний ПДО, снижается якорное упражнение или завершены не все занятия. Используются базовые подходы.")
         for item in trace.values():
             item["checks"] = {"avg_rir": stats["avg_rir"], "declining_anchor": decline, "missing_days": missing_days}
         return enforce_limits()
@@ -429,14 +584,14 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
         if movement.primary_group != "Не назначено":
             by_group[volume_group(movement.primary_group)].append((e, movement))
     for group, options in by_group.items():
-        cap = targets.get(group, [12, 18, default_cap])[2]
+        cap_value = cap(group, False)
         options.sort(key=lambda pair: (not pair[1].is_anchor, pair[0].position, slot_id(pair[0])))
-        if volume(group) < cap:
+        if volume(group) < cap_value:
             candidate = options[(week.week_number - 2) % len(options)][0]
             previous_count = counts[candidate.id]
             counts[candidate.id] = min(12, counts[candidate.id] + 1)
             if counts[candidate.id] > previous_count:
-                trace[candidate.id].update(reason_code="progression", reason="Недельные условия роста выполнены: выбранному упражнению основной мышцы добавлен один подход, максимум 12.")
+                trace[candidate.id].update(reason_code="progression", reason="Условия роста за цикл выполнены: выбранному упражнению основной мышцы добавлен один подход, максимум 12.")
             else:
                 trace[candidate.id].update(reason_code="max_sets", reason="Недельные условия роста выполнены, но упражнение уже достигло предела 12 подходов: прибавки нет.")
     return enforce_limits()
@@ -445,7 +600,7 @@ def planned_counts(db: Session, user_id: int, week: TrainingWeek | WeekState, de
 def is_reentry(db: Session, user_id: int, week: TrainingWeek | WeekState, week_plan: WeekPlan | None = None) -> bool:
     prior = week_plan.prior if week_plan is not None else db.scalar(select(TrainingWeek).where(
         TrainingWeek.user_id == user_id, TrainingWeek.week_start < week.week_start,
-        TrainingWeek.phase_type != "vacation",
+        TrainingWeek.phase_type != "vacation", TrainingWeek.period_kind == week.period_kind,
     ).order_by(TrainingWeek.week_start.desc()))
     return bool(week.phase_type == "accumulation" and prior and prior.phase_type == "deload" and not prior.missed_deload)
 
@@ -481,11 +636,13 @@ def next_set_suggestion(item: SessionExercise, step: float) -> dict | None:
                       "weight_step": step, "rir_difference": difference}}
 
 
-def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date) -> WorkoutSession | None:
+def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date,
+                          cycle_day: int | None = None) -> WorkoutSession | None:
     # All write paths acquire the same user's lock first. Different days can
     # otherwise race to insert their common training week/mesocycle.
     locked_row(db, User, User.telegram_id == template.user_id)
-    if vacation_override(db, template.user_id, on_date):
+    user = db.get(User, template.user_id)
+    if user.cycle_days is None and vacation_override(db, template.user_id, on_date):
         return None
     template = db.scalar(select(WorkoutTemplate).where(
         WorkoutTemplate.id == template.id, WorkoutTemplate.active.is_(True),
@@ -496,9 +653,14 @@ def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date)
     week = resolve_week(db, template.user_id, on_date)
     if week.phase_type == "vacation":
         return None
-    open_session = db.scalar(select(WorkoutSession).where(
-        WorkoutSession.template_id == template.id, WorkoutSession.status != "completed"
-    ).order_by(WorkoutSession.scheduled_date))
+    if week.period_kind == "cycle" and cycle_day is None:
+        return None
+    open_query = select(WorkoutSession).where(
+        WorkoutSession.template_id == template.id, WorkoutSession.status != "completed")
+    if week.period_kind == "cycle":
+        open_query = open_query.where(WorkoutSession.week_id == week.id,
+                                      WorkoutSession.cycle_day == cycle_day)
+    open_session = db.scalar(open_query.order_by(WorkoutSession.scheduled_date))
     if open_session:
         return open_session
     existing = db.scalar(select(WorkoutSession).where(
@@ -513,7 +675,8 @@ def get_or_create_session(db: Session, template: WorkoutTemplate, on_date: date)
     reentry = is_reentry(db, template.user_id, week)
     session = WorkoutSession(user_id=template.user_id, template_id=template.id,
         template_name=template.name, muscle_group=template.muscle_group,
-        scheduled_date=on_date, phase=1, phase_type=week.phase_type, week_id=week.id)
+        scheduled_date=on_date, phase=1, phase_type=week.phase_type, week_id=week.id,
+        cycle_day=cycle_day)
     db.add(session)
     db.flush()
     for e in exercises:

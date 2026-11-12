@@ -1,4 +1,4 @@
-import type { Exercise, ExerciseHistoryOptions, ExerciseInput, Me, Movement, MovementInput, MuscleTarget, NextWeek, Progress, ReplacementInput, ReplacementResult, Template, WorkoutSession } from './types'
+import type { CycleConfig, Exercise, ExerciseHistoryOptions, ExerciseInput, Me, Movement, MovementInput, MuscleTarget, NextWeek, Progress, ReplacementInput, ReplacementResult, Template, WorkoutSession } from './types'
 import { fetchApi } from './apiTransport'
 
 declare global {
@@ -12,7 +12,7 @@ export class ApiError extends Error {
 }
 
 let adminTargetId: number | null = null
-const programPath = (path: string) => /^\/(templates|movements|exercises)(\/|$)/.test(path)
+const programPath = (path: string) => /^\/(templates|movements|exercises|program)(\/|$)/.test(path)
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const initData = window.Telegram?.WebApp?.initData
@@ -46,7 +46,7 @@ const json = (value: unknown) => JSON.stringify(value)
 
 export const api = {
   setAdminTarget: (id: number | null) => { adminTargetId = id },
-  adminUsers: (query: string) => request<{ telegram_id: number; username: string; display_name: string | null }[]>(`/admin/users?q=${encodeURIComponent(query)}`),
+  adminUsers: (query = '', offset = 0) => request<{ telegram_id: number; username: string | null; display_name: string | null }[]>(`/admin/users?q=${encodeURIComponent(query)}&offset=${offset}`),
   me: () => request<Me>('/me'),
   updateProfile: (data: { sex: 'male' | 'female'; display_name: string; birth_date: string }) =>
     request<Me>('/me/profile', { method: 'PUT', body: json(data) }),
@@ -59,6 +59,9 @@ export const api = {
   createMovement: (data: MovementInput) => request<Movement>('/movements', { method: 'POST', body: json(data) }),
   updateMovement: (id: string, data: MovementInput) => request<Movement>(`/movements/${id}`, { method: 'PUT', body: json(data) }),
   templates: () => request<Template[]>('/templates'),
+  programCycle: () => request<CycleConfig>('/program/cycle'),
+  updateProgramCycle: (data: { length_days: number; start_date: string; slots: CycleConfig['slots'] }) =>
+    request<CycleConfig>('/program/cycle', { method: 'PUT', body: json(data) }),
   createTemplate: (data: { name: string; muscle_group: string; weekday: number; send_time: string }) =>
     request<Template>('/templates', { method: 'POST', body: json(data) }),
   updateTemplate: (id: string, data: { name: string; muscle_group: string; weekday: number; send_time: string }) =>

@@ -69,7 +69,7 @@ def database_rows(factory):
         rows = {table.name: sorted((tuple(row) for row in db.execute(select(table))), key=repr)
                 for table in Base.metadata.sorted_tables}
         rows["schema_versions"] = list(db.execute(text("SELECT version FROM schema_versions ORDER BY version")))
-        assert rows["schema_versions"][-1] == (8,)
+        assert rows["schema_versions"][-1] == (9,)
         return rows
 
 

@@ -72,7 +72,14 @@ export interface Template {
   muscle_group: string
   weekday: number
   send_time: string
+  cycle_days: number[]
   exercises: Exercise[]
+}
+
+export interface CycleConfig {
+  length_days: number | null
+  start_date: string | null
+  slots: { day: number; template_id: string }[]
 }
 
 export interface SetResult {
@@ -147,6 +154,9 @@ export interface WorkoutSession {
   week_id: string | null
   week_start: string | null
   week_number: number | null
+  period_kind?: 'week' | 'cycle'
+  period_days?: number
+  cycle_day?: number | null
   deload_reason: 'scheduled' | 'auto' | 'manual' | null
   feeling_beat_up: boolean
   status: 'planned' | 'in_progress' | 'completed'
@@ -159,6 +169,8 @@ export interface ProgressPoint {
   group: string
   groups: string[]
   date: string
+  period_start?: string
+  period_days?: number
   phase: Phase
   weight: number
   reps: number
@@ -169,7 +181,7 @@ export interface ProgressPoint {
 export interface Progress {
   exercises: { id: string; history_id: string; slot_id: string; movement_id: string | null; kind: Movement['kind']; name: string; label?: string; group: string; groups: string[]; points: ProgressPoint[] }[]
   groups: { group: string; cycle_volume: number; strength_change_percent: number | null; sessions: number }[]
-  weeks: { week_start: string; group: string; phase: string; deload_reason: string | null; hard_sets: number; working_sets: number; tonnage: number; avg_rir: number | null; avg_reps_hard: number | null; target_low: number | null; target_high: number | null; missed_deload: boolean }[]
+  weeks: { week_start: string; period_days?: number; period_kind?: 'week' | 'cycle'; group: string; phase: string; deload_reason: string | null; hard_sets: number; working_sets: number; tonnage: number; avg_rir: number | null; avg_reps_hard: number | null; target_low: number | null; target_high: number | null; missed_deload: boolean }[]
   weekly_summary?: (Omit<Progress['weeks'][number], 'target_low' | 'target_high'> & { target_low: null; target_high: null; rir_known_sets: number; rir_unknown_sets: number })[]
   signals: string[]
 }
@@ -187,4 +199,4 @@ export interface Me {
   profile_complete: boolean
 }
 
-export interface NextWeek { week_start: string; kind: 'deload' | 'vacation' | null }
+export interface NextWeek { week_start: string; kind: 'deload' | 'vacation' | null; unit?: 'week' | 'cycle'; length_days?: number }

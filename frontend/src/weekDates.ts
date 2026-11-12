@@ -26,3 +26,21 @@ export function weekRangeLines(start: string): [string, string] {
     ? [`${first.getUTCDate()}–${last.getUTCDate()}`, month(last)]
     : [`${first.getUTCDate()} ${month(first)}–`, `${last.getUTCDate()} ${month(last)}`]
 }
+
+export function periodRange(start: string, days = 7): string {
+  const first = date(start)
+  const last = date(start)
+  last.setUTCDate(last.getUTCDate() + days - 1)
+  return first.getUTCMonth() === last.getUTCMonth() && first.getUTCFullYear() === last.getUTCFullYear()
+    ? `${first.getUTCDate()}–${last.getUTCDate()} ${month(last)}`
+    : `${first.getUTCDate()} ${month(first)}–${last.getUTCDate()} ${month(last)}`
+}
+
+export function periodRangeLines(start: string, days = 7): [string, string] {
+  const first = date(start)
+  const last = date(start)
+  last.setUTCDate(last.getUTCDate() + days - 1)
+  return first.getUTCMonth() === last.getUTCMonth() && first.getUTCFullYear() === last.getUTCFullYear()
+    ? [`${first.getUTCDate()}–${last.getUTCDate()}`, month(last)]
+    : [`${first.getUTCDate()} ${month(first)}–`, `${last.getUTCDate()} ${month(last)}`]
+}

@@ -59,6 +59,25 @@ class TemplateIn(BaseModel):
         return ", ".join(groups)
 
 
+class CycleSlotIn(BaseModel):
+    day: int = Field(ge=1, le=30)
+    template_id: str
+
+
+class CycleConfigIn(BaseModel):
+    length_days: int = Field(ge=2, le=30)
+    start_date: date
+    slots: list[CycleSlotIn] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def valid_slots(self):
+        if any(slot.day > self.length_days for slot in self.slots):
+            raise ValueError("День занятия выходит за пределы цикла")
+        if len({(slot.day, slot.template_id) for slot in self.slots}) != len(self.slots):
+            raise ValueError("Одинаковое занятие нельзя поставить дважды в один день")
+        return self
+
+
 class ExerciseIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     position: int = Field(default=0, ge=0)

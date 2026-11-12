@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Progress } from './types'
-import { weekRange, weekRangeLines, weekStart } from './weekDates'
+import { periodRange, periodRangeLines, weekStart } from './weekDates'
 
 type WeekRow = Progress['weeks'][number] | NonNullable<Progress['weekly_summary']>[number]
-type Point = { date: string; value: number | null; phase?: string }
+type Point = { date: string; days?: number; value: number | null; phase?: string }
 const blue = '#7096d0'
 const grey = '#aeb4bd'
 const coral = '#dd8580'
@@ -44,12 +44,12 @@ function Axis({ width, top, bottom, left, right, min, max, unit }: {
   </>
 }
 
-function DateAxis({ dates, x, bottom, width, right, label, labelY = 258 }: {
-  dates: string[]; x: (index: number) => number; bottom: number; width: number; right: number; label: string; labelY?: number
+function DateAxis({ dates, durations, x, bottom, width, right, label, labelY = 258 }: {
+  dates: string[]; durations?: number[]; x: (index: number) => number; bottom: number; width: number; right: number; label: string; labelY?: number
 }) {
   return <>
     {dates.map((day, i) => {
-      const [range, month] = weekRangeLines(day)
+      const [range, month] = periodRangeLines(day, durations?.[i] ?? 7)
       return <text key={`${day}-${i}`} x={x(i)} y={bottom + 18} textAnchor="middle" className="plotTick">
         <tspan x={x(i)}>{range}</tspan><tspan x={x(i)} dy="13">{month}</tspan>
       </text>
@@ -62,7 +62,7 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
   return <div className="plotLegend">{items.map(item => <span key={item.label}><i style={{ background: item.color }} />{item.label}</span>)}</div>
 }
 
-function LineChart({ title, points, unit, fromZero = false, note, assessment = 'none', xAxisLabel = 'Начало недели' }: {
+function LineChart({ title, points, unit, fromZero = false, note, assessment = 'none', xAxisLabel = 'Тренировочный период' }: {
   title: string; points: Point[]; unit: string; fromZero?: boolean; note: string; assessment?: 'none' | 'quality' | 'rir'; xAxisLabel?: string
 }) {
   const { ref, width } = useWidth()
@@ -98,24 +98,24 @@ function LineChart({ title, points, unit, fromZero = false, note, assessment = '
         ? <line key={`segment-${i}`} x1={x(i)} y1={y(points[i].value!)} x2={x(i + 1)} y2={y(point.value)} className="plotLine" stroke={tone(i + 1)} /> : null)}
       {valid.map(point => <g key={point.index}>
         <circle cx={x(point.index)} cy={y(point.value!)} r="3.5" className="plotPoint" stroke={tone(point.index)}>
-          <title>{`${weekRange(point.date)}: ${format(point.value!)} ${unit}`}</title>
+          <title>{`${periodRange(point.date, point.days)}: ${format(point.value!)} ${unit}`}</title>
         </circle>
         <text x={x(point.index)} y={y(point.value!) < top + 22 ? y(point.value!) + 19 : y(point.value!) - 10} textAnchor="middle" className="plotValue">{format(point.value!)}</text>
       </g>)}
-      <DateAxis dates={points.map(point => point.date)} x={x} bottom={bottom} width={chartWidth} right={right} label={xAxisLabel} labelY={388} />
+      <DateAxis dates={points.map(point => point.date)} durations={points.map(point => point.days ?? 7)} x={x} bottom={bottom} width={chartWidth} right={right} label={xAxisLabel} labelY={388} />
     </svg>
   </div>{assessment === 'quality' && <Legend items={[{ color: green, label: 'лучше: больше повторов' }, { color: blue, label: 'без заметного изменения' }, { color: coral, label: 'хуже: меньше повторов' }]} />}
-    {assessment === 'rir' && <Legend items={[{ color: coral, label: 'ПДО < 1: почти без запаса' }, { color: green, label: 'ПДО 1–3: 1–3 повтора в запасе' }, { color: amber, label: 'ПДО > 3: больше запаса' }, { color: grey, label: 'Легкая неделя' }]} />}
+    {assessment === 'rir' && <Legend items={[{ color: coral, label: 'ПДО < 1: почти без запаса' }, { color: green, label: 'ПДО 1–3: 1–3 повтора в запасе' }, { color: amber, label: 'ПДО > 3: больше запаса' }, { color: grey, label: 'Лёгкий период' }]} />}
     <p className="hint chartNote">Последнее значение: {format(values.at(-1)!)} {unit}{unit.endsWith('.') ? '' : '.'} {note}</p></div>
 }
 
 export function LineGraph({ rows, field, label, unit }: {
   rows: WeekRow[]; field: 'avg_reps_hard' | 'tonnage' | 'avg_rir'; label: string; unit: string
 }) {
-  const points = rows.map(row => ({ date: row.week_start,
+  const points = rows.map(row => ({ date: row.week_start, days: row.period_days ?? 7,
     value: field === 'avg_reps_hard' && row.phase !== 'accumulation' ? null : row[field], phase: row.phase }))
   return <LineChart title={label} points={points} unit={unit} fromZero={field !== 'avg_reps_hard'} assessment={field === 'avg_reps_hard' ? 'quality' : field === 'avg_rir' ? 'rir' : 'none'}
-    note={field === 'avg_reps_hard' ? 'Цвет сравнивает соседние сопоставимые недели; Легкая неделя исключена из линии.' : field === 'tonnage' ? 'Синий — изменение нагрузки без оценки «лучше/хуже»; Легкая неделя серым.' : 'Легкая неделя отмечена серым.'} />
+    note={field === 'avg_reps_hard' ? 'Цвет сравнивает соседние сопоставимые периоды; лёгкий цикл исключён из линии.' : field === 'tonnage' ? 'Синий — изменение нагрузки без оценки «лучше/хуже»; лёгкий цикл серым.' : 'Лёгкий цикл отмечен серым.'} xAxisLabel="Тренировочный период" />
 }
 
 export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles: boolean }) {
@@ -129,7 +129,7 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
   const slot = plotWidth / rows.length
   const barWidth = Math.min(32, slot * 0.5)
   const y = (value: number) => bottom - value / max * plotHeight
-  return <div className="chartCard"><h3>Рабочие подходы по неделям</h3><div className="plotWrap" ref={ref}>
+  return <div className="chartCard"><h3>Рабочие подходы по циклам</h3><div className="plotWrap" ref={ref}>
     <svg width={chartWidth} height="395" viewBox={`0 0 ${chartWidth} 395`} role="img" aria-label={`Рабочие и жёсткие подходы, ${allMuscles ? 'все мышцы' : rows[0].group}`}>
       <Axis width={chartWidth} top={top} bottom={bottom} left={left} right={right} min={0} max={max} unit="Рабочие подходы" />
       {rows.map((row, i) => {
@@ -140,28 +140,28 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
           {deload && <rect x={left + i * slot + 2} y={top} width={slot - 4} height={plotHeight} className="plotDeload" />}
           {!allMuscles && !deload && row.target_low !== null && row.target_high !== null && <rect x={center - barWidth / 2 - 3} y={y(row.target_high)} width={barWidth + 6} height={y(row.target_low) - y(row.target_high)} className="plotTarget" />}
           <rect x={center - barWidth / 2} y={y(row.working_sets)} width={barWidth} height={bottom - y(row.working_sets)} rx="4" fill={color} opacity="0.3">
-            <title>{`${weekRange(row.week_start)}${deload ? ' · Легкая неделя' : ''}: ${format(row.working_sets)} рабочих, из них ${format(row.hard_sets)} с ПДО ≤ 3`}</title>
+            <title>{`${periodRange(row.week_start, row.period_days)}${deload ? ' · Лёгкий цикл' : ''}: ${format(row.working_sets)} рабочих, из них ${format(row.hard_sets)} с ПДО ≤ 3`}</title>
           </rect>
           {row.hard_sets > 0 && <rect x={center - barWidth * 0.32} y={y(row.hard_sets)} width={barWidth * 0.64} height={bottom - y(row.hard_sets)} rx="3" fill={color}>
-            <title>{`${weekRange(row.week_start)}: ${format(row.hard_sets)} рабочих подходов с ПДО ≤ 3`}</title>
+            <title>{`${periodRange(row.week_start, row.period_days)}: ${format(row.hard_sets)} рабочих подходов с ПДО ≤ 3`}</title>
           </rect>}
           <text x={center} y={Math.max(top + 12, y(row.working_sets) - 6)} textAnchor="middle" className="plotBarValue">{format(row.working_sets)}</text>
         </g>
       })}
-      <DateAxis dates={rows.map(row => row.week_start)} x={i => left + (i + 0.5) * slot} bottom={bottom} width={chartWidth} right={right} label="Неделя" labelY={388} />
+      <DateAxis dates={rows.map(row => row.week_start)} durations={rows.map(row => row.period_days ?? 7)} x={i => left + (i + 0.5) * slot} bottom={bottom} width={chartWidth} right={right} label="Тренировочный период" labelY={388} />
     </svg>
-  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Легкая неделя' }] : hasTarget ? [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Легкая неделя' }] : [{ color: blue, label: 'объём зоны без отдельной цели' }, { color: grey, label: 'Легкая неделя' }]} />
-    <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : hasTarget ? 'Цвет определяется по числу рабочих подходов относительно цели.' : 'У этой анатомической зоны нет отдельной недельной цели; она входит в цель крупной мышечной группы.'}</p></div>
+  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Лёгкий период' }] : hasTarget ? [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Лёгкий период' }] : [{ color: blue, label: 'объём зоны без отдельной цели' }, { color: grey, label: 'Лёгкий период' }]} />
+    <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : hasTarget ? 'Цвет определяется по числу рабочих подходов относительно цели.' : 'У этой анатомической зоны нет отдельной цели за период; она входит в цель крупной мышечной группы.'}</p></div>
 }
 
 export function ExerciseTrend({ points, label }: { points: Progress['exercises'][number]['points']; label?: string }) {
   if (!points.length) return null
-  const weekly = new Map<string, { date: string; value: number; phase: string }>()
+  const weekly = new Map<string, { date: string; days: number; value: number; phase: string }>()
   for (const point of points) {
-    const date = weekStart(point.date)
+    const date = point.period_start ?? weekStart(point.date)
     const previous = weekly.get(date)
-    if (!previous || point.reps > previous.value) weekly.set(date, { date, value: point.reps, phase: point.phase })
+    if (!previous || point.reps > previous.value) weekly.set(date, { date, days: point.period_days ?? 7, value: point.reps, phase: point.phase })
   }
   const series = [...weekly.values()].sort((a, b) => a.date.localeCompare(b.date))
-  return <LineChart title={label ? `${label} — повторы` : 'Повторения выбранного упражнения'} points={series} unit="повт." xAxisLabel="Неделя" note="Показан лучший результат недели; Легкая неделя отмечена серым." />
+  return <LineChart title={label ? `${label} — повторы` : 'Повторения выбранного упражнения'} points={series} unit="повт." xAxisLabel="Тренировочный период" note="Показан лучший результат периода; лёгкий цикл отмечен серым." />
 }
