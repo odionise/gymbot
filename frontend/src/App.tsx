@@ -7,6 +7,7 @@ import { WorkoutView } from './WorkoutView'
 import { ProfileForm } from './ProfileForm'
 import { AdminView } from './AdminView'
 import { MuscleDiagram } from './MuscleDiagram'
+import { LoadingScreen } from './LoadingScreen'
 import { IconAdjustmentsHorizontal, IconCalendarWeek, IconChartLine, IconHistory, IconPlus, IconShieldLock } from '@tabler/icons-react'
 import type { Me, NextWeek, Template, WorkoutSession } from './types'
 
@@ -168,6 +169,9 @@ export default function App() {
   const programRequestVersion = useRef(0)
   const [sessions, setSessions] = useState<WorkoutSession[]>([])
   const [completedToday, setCompletedToday] = useState<WorkoutSession[]>([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+  const [todayLoadError, setTodayLoadError] = useState('')
   const [selected, setSelected] = useState<WorkoutSession | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -178,44 +182,59 @@ export default function App() {
   const refresh = useCallback(async () => {
     const version = ++programRequestVersion.current
     const profile = await api.me()
-    if (version !== programRequestVersion.current) return
+    if (version !== programRequestVersion.current) return null
     setMe(profile)
-    if (!profile.profile_complete) return
-    const programRequest = api.templates().then(program => {
+    if (!profile.profile_complete) return profile
+    void api.templates().then(program => {
       if (version !== programRequestVersion.current) return
       setTemplates(program)
       setProgramLoadedAt(new Date().toISOString())
       setProgramError('')
     }).catch((err: Error) => {
       if (version === programRequestVersion.current) setProgramError(err.message)
+    })
+    void api.completedToday().then(history => {
+      if (version !== programRequestVersion.current) return
+      const dateParts = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: profile.timezone }).formatToParts(new Date())
+      const part = (type: string) => dateParts.find(item => item.type === type)?.value ?? ''
+      const localDate = `${part('year')}-${part('month')}-${part('day')}`
+      setCompletedToday(history.filter(item => (item.actual_date ?? item.scheduled_date) === localDate))
+      setHistoryLoaded(true)
+      setHistoryError('')
+    }).catch((err: Error) => {
+      if (version === programRequestVersion.current) {
+        setHistoryError(err.message)
+        setHistoryLoaded(true)
+      }
+    })
+    void api.nextWeek().then(upcoming => {
+      if (version === programRequestVersion.current) setNextWeek(upcoming)
+    }).catch((err: Error) => {
+      if (version === programRequestVersion.current) setError(err.message)
+    })
+    // Today's plan is the only data required before showing the home screen.
+    let today: WorkoutSession[]
+    try { today = await api.today() } catch (err) {
+      if (version === programRequestVersion.current) setTodayLoadError((err as Error).message)
       throw err
-    })
-    // A failure in today's plan must not discard an already loaded program.
-    const loaded = await Promise.all([programRequest, api.today(), api.history(), api.nextWeek()]).catch(err => {
-      if (version === programRequestVersion.current) throw err
-      return null
-    })
-    if (!loaded || version !== programRequestVersion.current) return
-    const [, today, history, upcoming] = loaded
-    const dateParts = new Intl.DateTimeFormat('en-US', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: profile.timezone }).formatToParts(new Date())
-    const part = (type: string) => dateParts.find(item => item.type === type)?.value ?? ''
-    const localDate = `${part('year')}-${part('month')}-${part('day')}`
+    }
+    if (version !== programRequestVersion.current) return null
     setSessions(today)
-    setCompletedToday(history.filter(item => (item.actual_date ?? item.scheduled_date) === localDate))
-    setNextWeek(upcoming)
+    setTodayLoadError('')
+    return profile
   }, [])
 
   useEffect(() => {
-    refresh().then(async () => {
+    refresh().then(async profile => {
       const sessionId = new URLSearchParams(window.location.search).get('session')
-      if (sessionId && (await api.me()).profile_complete) {
+      if (sessionId && profile?.profile_complete) {
         try { setSelected(await api.session(sessionId)) } catch { /* expired deep link */ }
       }
     }).catch((err: Error) => setError(err.message)).finally(() => setLoading(false))
   }, [refresh])
 
   useEffect(() => {
-    const color = '#f5f6f7'
+    const color = '#08090b'
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', color)
     document.documentElement.style.backgroundColor = color
     document.body.style.backgroundColor = color
@@ -245,7 +264,7 @@ export default function App() {
     refresh().catch((err: Error) => setError(err.message))
   }
 
-  if (loading) return <div className="loading"><span className="loadingMark" />Загружаем тренировку<span className="loadingDots">…</span></div>
+  if (loading) return <LoadingScreen />
 
   if (!me?.profile_complete) return <div className="appShell"><main className="page">
     {me ? <ProfileForm profile={me} onSaved={profile => { setMe(profile); refresh().catch((err: Error) => setError(err.message)) }} />
@@ -278,7 +297,7 @@ export default function App() {
             <div className="heroExercises">{session.exercises.slice(0, 3).map(item => <div className="heroExercise" key={item.id}><span>{item.name}</span><strong>{item.kind === 'strength' ? `${formatWeight(item.target_weight)} кг · ${item.sets_count} × ${item.target_reps}` : `${item.target_duration_minutes} мин`}</strong></div>)}{session.exercises.length > 3 && <span className="heroMore">И ещё {session.exercises.length - 3}</span>}</div>
             <button className="heroFooter" onClick={() => openSession(session.id)}><span>{session.status === 'in_progress' ? 'Продолжить тренировку' : 'Начать тренировку'}</span><span aria-hidden="true">→</span></button>
           </article>
-        )}</div> : error ? <div className="emptyCard"><div className="emptyIcon">!</div><span className="emptyOverline">Данные недоступны</span><h2>План не загрузился.</h2><p>Проверьте соединение и попробуйте ещё раз.</p><button className="outlineButton" onClick={() => { setError(''); refresh().catch((err: Error) => setError(err.message)) }}>Повторить загрузку</button></div> : completedToday.length ? <div className="completedSession"><div className="completedTop"><span>Тренировка завершена</span><span className="completedSymbol" aria-hidden="true">✓</span></div><h2>{completedToday.map(item => item.template_name).join(' · ')}</h2><p>{completedSets} записанных результатов</p><button onClick={() => setTab('history')}>Посмотреть результаты <span aria-hidden="true">→</span></button></div> : <div className="emptyCard"><div className="emptyIcon">—</div><span className="emptyOverline">Пауза в расписании</span><h2>Сегодня без тренировки.</h2><p>План можно открыть вручную, если это не неделя отпуска.</p></div>}
+        )}</div> : todayLoadError ? <div className="emptyCard"><div className="emptyIcon">!</div><span className="emptyOverline">Данные недоступны</span><h2>План не загрузился.</h2><p>{todayLoadError}</p><button className="outlineButton" onClick={() => { setError(''); refresh().catch((err: Error) => setError(err.message)) }}>Повторить загрузку</button></div> : !historyLoaded ? <div className="emptyCard">Проверяем завершённые тренировки…</div> : historyError ? <div className="emptyCard"><h2>История не загрузилась.</h2><p>{historyError}</p><button className="outlineButton" onClick={retryLoad}>Повторить загрузку</button></div> : completedToday.length ? <div className="completedSession"><div className="completedTop"><span>Тренировка завершена</span><span className="completedSymbol" aria-hidden="true">✓</span></div><h2>{completedToday.map(item => item.template_name).join(' · ')}</h2><p>{completedSets} записанных результатов</p><button onClick={() => setTab('history')}>Посмотреть результаты <span aria-hidden="true">→</span></button></div> : <div className="emptyCard"><div className="emptyIcon">—</div><span className="emptyOverline">Пауза в расписании</span><h2>Сегодня без тренировки.</h2><p>План можно открыть вручную, если это не неделя отпуска.</p></div>}
         <div className="sectionHead"><h2>Ваши тренировки</h2><span>{programLoadedAt ? templates.length : 'н/д'}</span></div>
         {programError && <ProgramLoadError cachedAt={programLoadedAt} onRetry={retryLoad} />}
         {!programLoadedAt ? !programError && <div className="emptyCard">Загружаем программу…</div> : templates.length ? <div className="templateList">{templates.map((template, index) =>

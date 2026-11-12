@@ -25,6 +25,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     response = await fetchApi(`/api${path}`, {
       ...options,
+      cache: 'no-store',
       headers: { ...headers, ...(options.headers as Record<string, string> | undefined) },
     })
   } catch (cause) {
@@ -76,6 +77,7 @@ export const api = {
   start: (id: string) => request<WorkoutSession>(`/templates/${id}/start`, { method: 'POST' }),
   session: (id: string) => request<WorkoutSession>(`/sessions/${id}`),
   history: () => request<WorkoutSession[]>('/sessions'),
+  completedToday: () => request<WorkoutSession[]>('/sessions/completed-today'),
   override: (id: string, target_weight: number, target_reps: number) =>
     request<WorkoutSession>(`/session-exercises/${id}/target`, { method: 'PATCH', body: json({ target_weight, target_reps }) }),
   saveSet: (id: string, index: number, weight: number, reps: number, rir_reported: number | null, is_working = true) =>

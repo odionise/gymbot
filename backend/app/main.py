@@ -527,6 +527,20 @@ def history(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return [session_dict(item, db.get(WorkoutTemplate, item.template_id)) for item in items]
 
 
+@app.get("/api/sessions/completed-today")
+def completed_today(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    local_date = datetime.now(ZoneInfo(user.timezone)).date()
+    items = db.scalars(select(WorkoutSession).where(
+        WorkoutSession.user_id == user.telegram_id,
+        WorkoutSession.status == "completed",
+        or_(WorkoutSession.actual_date == local_date,
+            (WorkoutSession.actual_date.is_(None)) & (WorkoutSession.scheduled_date == local_date)),
+    ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results),
+              selectinload(WorkoutSession.week))
+     .order_by(WorkoutSession.completed_at.desc().nulls_last(), WorkoutSession.id.desc())).all()
+    return [session_dict(item, db.get(WorkoutTemplate, item.template_id)) for item in items]
+
+
 @app.get("/api/sessions/{session_id}")
 def session_detail(session_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     item = owned_session(db, user, session_id)

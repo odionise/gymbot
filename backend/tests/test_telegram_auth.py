@@ -7,6 +7,7 @@ See https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini
 import hashlib
 import hmac
 import json
+from datetime import date
 from types import SimpleNamespace
 from urllib.parse import urlencode
 
@@ -106,7 +107,7 @@ def test_mini_app_startup_with_full_init_data_and_owner_isolation(auth_database,
     client = TestClient(main.app)  # No lifespan, real Telegram or reminders.
     try:
         header = {"Authorization": "tma " + signed(fields(clock))}
-        for path in ("/api/me", "/api/templates", "/api/sessions/today", "/api/sessions", "/api/next-week"):
+        for path in ("/api/me", "/api/templates", "/api/sessions/today", "/api/sessions", "/api/sessions/completed-today", "/api/next-week"):
             response = client.get(path, headers=header)
             assert response.status_code == 200, path
             if path == "/api/templates":
@@ -120,8 +121,20 @@ def test_mini_app_startup_with_full_init_data_and_owner_isolation(auth_database,
             assert [item["id"] for item in client.get("/api/sessions/today", headers=header).json()] == today_ids
         with auth_database() as db:
             assert db.scalar(select(func.count()).select_from(WorkoutSession)) == 1
+            session = db.get(WorkoutSession, today_ids[0])
+            session.status = "completed"
+            session.actual_date = date(2026, 10, 25)
+            session.completed_at = clock.moment
+            db.commit()
+        assert client.get("/api/sessions/completed-today", headers=header).json() == []
+        with auth_database() as db:
+            db.get(WorkoutSession, today_ids[0]).actual_date = date(2026, 10, 26)
+            db.commit()
+        assert [item["id"] for item in client.get("/api/sessions/completed-today", headers=header).json()] == today_ids
         other = {"Authorization": "tma " + signed(fields(clock, 2002))}
         assert client.get("/api/templates", headers=other).json() == []
+        assert client.get("/api/sessions/completed-today", headers=other).json() == []
+        assert client.get("/api/sessions/completed-today").status_code == 401
         assert client.get("/api/templates").status_code == 401
         bad = {"Authorization": "tma " + signed(fields(clock, 3003), omit_signature_from_hash=True)}
         assert client.get("/api/me", headers=bad).status_code == 401

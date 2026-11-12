@@ -17,6 +17,12 @@
     { "source": "/health", "destination": { "service": "api" } },
     { "source": "/(.*)", "destination": { "service": "web" } }
   ],
+  "headers": [
+    { "source": "/assets/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }] },
+    { "source": "/fonts/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }] },
+    { "source": "/anatomy/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }] },
+    { "source": "/api/(.*)", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] }
+  ],
   "schedules": {
     "reminders": {
       "schedule": "*/15 * * * *",
