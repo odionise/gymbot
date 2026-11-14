@@ -1,4 +1,4 @@
-export type Phase = 'light' | 'medium' | 'heavy' | 'accumulation' | 'deload'
+export type Phase = 'light' | 'medium' | 'heavy' | 'accumulation' | 'deload' | 'manual'
 
 export interface Movement {
   id: string; name: string; kind: 'strength' | 'cardio' | 'stretch' | 'other_timed'; primary_group: string; secondary_groups: string[]; is_anchor: boolean; is_used: boolean
@@ -145,6 +145,7 @@ export interface SessionExercise {
 
 export interface WorkoutSession {
   id: string
+  entry_mode?: 'scheduled' | 'manual'
   template_id: string
   template_name: string
   muscle_group: string

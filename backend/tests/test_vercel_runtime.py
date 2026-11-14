@@ -17,7 +17,7 @@ def test_marketplace_postgres_url_uses_installed_psycopg_driver():
         engine.dispose()
 
 
-def test_scheduled_reminders_require_secret_and_send_once(monkeypatch):
+def test_scheduled_reminders_require_secret_but_send_nothing(monkeypatch):
     monkeypatch.setenv("CRON_SECRET", "synthetic-schedule-secret")
     sender = AsyncMock(return_value=2)
     monkeypatch.setattr(main, "send_due_reminders", sender)
@@ -29,8 +29,8 @@ def test_scheduled_reminders_require_secret_and_send_once(monkeypatch):
         assert client.post("/api/internal/reminders", headers={"Authorization": "Bearer wrong"}).status_code == 403
         response = client.post("/api/internal/reminders", headers={"Authorization": "Bearer synthetic-schedule-secret"})
     assert response.status_code == 200
-    assert response.json() == {"sent": 2}
-    sender.assert_awaited_once()
+    assert response.json() == {"sent": 0}
+    sender.assert_not_awaited()
 
 
 def test_vercel_lifespan_does_not_register_webhook_or_start_loop(monkeypatch):

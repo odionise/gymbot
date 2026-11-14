@@ -63,7 +63,7 @@ async def start(message: Message, bot: Bot):
     if prompt:
         await message.answer(prompt[0], reply_markup=prompt[1])
     else:
-        await message.answer("Готово. Откройте приложение и настройте программу и расписание.", reply_markup=app_button())
+        await message.answer("Готово. Откройте приложение и настройте тренировки.", reply_markup=app_button())
 
 
 async def profile_answer(message: Message):

@@ -5,6 +5,7 @@ import './instrument.css'
 import './reference.css'
 import './dropset.css'
 import './dropset-video.css'
+import './index.css'
 
 window.Telegram?.WebApp?.ready()
 window.Telegram?.WebApp?.expand()

@@ -126,3 +126,9 @@ def migrate(engine):
                     if name not in existing:
                         connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {specification}"))
             connection.execute(text("INSERT INTO schema_versions (version) VALUES (9)"))
+        if version < 10:
+            inspector.clear_cache()
+            existing = {column["name"] for column in inspector.get_columns("workout_sessions")}
+            if "entry_mode" not in existing:
+                connection.execute(text("ALTER TABLE workout_sessions ADD COLUMN entry_mode VARCHAR(16) NOT NULL DEFAULT 'scheduled'"))
+            connection.execute(text("INSERT INTO schema_versions (version) VALUES (10)"))

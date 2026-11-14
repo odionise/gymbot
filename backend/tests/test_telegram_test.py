@@ -656,15 +656,15 @@ def test_menu_requires_confirmed_url_after_update(launcher):
     assert len(bot.menu_writes) == 1
 
 
-def test_reminder_setting_preserves_default_and_supports_explicit_test_disable(monkeypatch):
+def test_reminders_are_disabled_by_default(monkeypatch):
     monkeypatch.delenv("REMINDERS_ENABLED", raising=False)
-    assert config.Settings(_env_file=None).reminders_enabled is True
+    assert config.Settings(_env_file=None).reminders_enabled is False
     assert config.Settings(_env_file=None, reminders_enabled=False).reminders_enabled is False
 
 
 @pytest.mark.parametrize("mode", ["development", "production"])
 @pytest.mark.parametrize("enabled", [False, True])
-def test_lifespan_only_runs_automatic_reminders_when_enabled(monkeypatch, mode, enabled):
+def test_lifespan_never_runs_automatic_reminders(monkeypatch, mode, enabled):
     settings = SimpleNamespace(
         app_env=mode, bot_token=TOKEN, public_url="https://synthetic.trycloudflare.com",
         webhook_secret="test-only-webhook-secret", database_url="postgresql+psycopg://test@127.0.0.1/test",
@@ -708,12 +708,12 @@ def test_lifespan_only_runs_automatic_reminders_when_enabled(monkeypatch, mode, 
             await asyncio.sleep(0)
             assert migrations == [isolated_engine]
             assert fake_app.state.bot is bots[0]
-            assert reminders == ([bots[0]] if enabled else [])
+            assert reminders == []
             assert bots[0].session.closed is False
         assert bots[0].session.closed is True
 
     asyncio.run(exercise())
-    assert cancelled == ([bots[0]] if enabled else [])
+    assert cancelled == []
     assert bots[0].webhooks == ([
         ("https://synthetic.trycloudflare.com/telegram/webhook",
          {"secret_token": "test-only-webhook-secret"})

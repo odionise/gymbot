@@ -129,7 +129,7 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
   const slot = plotWidth / rows.length
   const barWidth = Math.min(32, slot * 0.5)
   const y = (value: number) => bottom - value / max * plotHeight
-  return <div className="chartCard"><h3>Рабочие подходы по циклам</h3><div className="plotWrap" ref={ref}>
+  return <div className="chartCard"><h3>Рабочие подходы по периодам</h3><div className="plotWrap" ref={ref}>
     <svg width={chartWidth} height="395" viewBox={`0 0 ${chartWidth} 395`} role="img" aria-label={`Рабочие и жёсткие подходы, ${allMuscles ? 'все мышцы' : rows[0].group}`}>
       <Axis width={chartWidth} top={top} bottom={bottom} left={left} right={right} min={0} max={max} unit="Рабочие подходы" />
       {rows.map((row, i) => {
@@ -150,8 +150,8 @@ export function VolumeGraph({ rows, allMuscles }: { rows: WeekRow[]; allMuscles:
       })}
       <DateAxis dates={rows.map(row => row.week_start)} durations={rows.map(row => row.period_days ?? 7)} x={i => left + (i + 0.5) * slot} bottom={bottom} width={chartWidth} right={right} label="Тренировочный период" labelY={388} />
     </svg>
-  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Лёгкий период' }] : hasTarget ? [{ color: amber, label: 'ниже цели' }, { color: green, label: 'в пределах цели' }, { color: coral, label: 'выше цели' }, { color: grey, label: 'Лёгкий период' }] : [{ color: blue, label: 'объём зоны без отдельной цели' }, { color: grey, label: 'Лёгкий период' }]} />
-    <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — рабочие подходы с ПДО ≤ 3. {allMuscles ? 'Выберите мышцу, чтобы увидеть её целевой коридор.' : hasTarget ? 'Цвет определяется по числу рабочих подходов относительно цели.' : 'У этой анатомической зоны нет отдельной цели за период; она входит в цель крупной мышечной группы.'}</p></div>
+  </div><Legend items={allMuscles ? [{ color: blue, label: 'каждый рабочий подход один раз' }, { color: grey, label: 'Лёгкий период в старой истории' }] : hasTarget ? [{ color: amber, label: 'ниже старой цели' }, { color: green, label: 'в пределах старой цели' }, { color: coral, label: 'выше старой цели' }, { color: blue, label: 'без цели' }] : [{ color: blue, label: 'без цели' }]} />
+    <p className="hint chartNote">Число и светлый столбец — все рабочие подходы; тёмная часть — подходы с ПДО ≤ 3. Для новых занятий цели не рассчитываются; старые цели сохранены в истории.</p></div>
 }
 
 export function ExerciseTrend({ points, label }: { points: Progress['exercises'][number]['points']; label?: string }) {

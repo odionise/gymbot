@@ -31,10 +31,12 @@ def progress_for_user(db: Session, user_id: int) -> dict:
     # Missing muscle/RIR metadata does not erase a known weight/repetition fact.
     totals = defaultdict(lambda: {"hard_sets": 0, "working_sets": 0,
                                   "tonnage": 0.0, "rirs": [], "reps": defaultdict(list), "phases": set()})
+    period_modes = defaultdict(set)
     for session in sessions:
         day = session.actual_date or session.scheduled_date
         saved_period = periods_by_id.get(session.week_id)
         start = saved_period.week_start if saved_period and saved_period.period_kind == "cycle" else monday(day)
+        period_modes[start].add("manual" if session.entry_mode == "manual" else "legacy")
         for exercise in session.exercises:
             if exercise.kind != "strength" or exercise.skipped or not exercise.results:
                 continue
@@ -44,7 +46,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
             groups = ([exercise.primary_group] + split_details(exercise.secondary_groups)
                       if exercise.primary_group and exercise.primary_group != "Не назначено"
                       else split_muscle_groups(session.muscle_group))
-            phase = session.phase_type or PHASES[session.phase]
+            phase = "manual" if session.entry_mode == "manual" else session.phase_type or PHASES[session.phase]
             volume = sum(float(r.weight) * r.reps for r in results)
             strength = max((float(r.weight) * (1 + r.reps / 30)
                             for r in results if 2 <= r.reps <= 10), default=None)
@@ -60,7 +62,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                 "estimated_strength": round(strength, 2) if strength is not None else None,
             })
             total = totals[start]
-            total["phases"].add(session.phase_type or "unknown")
+            total["phases"].add(phase)
             for r in results:
                 total["working_sets"] += 1
                 total["tonnage"] += float(r.weight) * r.reps
@@ -68,7 +70,7 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                     total["rirs"].append(float(r.rir_reported))
                     if float(r.rir_reported) <= 3:
                         total["hard_sets"] += 1
-                        if session.phase_type == "accumulation":
+                        if phase in ("accumulation", "manual"):
                             total["reps"][(key, float(r.weight), float(r.rir_reported))].append(r.reps)
             if session.phase_type is None or not exercise.primary_group or exercise.primary_group == "Не назначено":
                 continue
@@ -82,26 +84,35 @@ def progress_for_user(db: Session, user_id: int) -> dict:
                         bucket["rirs"].append(float(r.rir_reported))
                         if float(r.rir_reported) <= 3:
                             bucket["hard_sets"] += factor
-                            if session.phase_type == "accumulation":
+                            if phase in ("accumulation", "manual"):
                                 bucket["reps"][(key, float(r.weight), float(r.rir_reported))].append(r.reps)
     weeks = periods_by_start
+    def period_phase(start):
+        modes = period_modes[start]
+        if modes == {"manual"}:
+            return "manual"
+        if "manual" in modes:
+            return "mixed"
+        week = weeks.get(start)
+        return week.phase_type if week else "accumulation"
+
     comparable = defaultdict(set)
     for (start, group), bucket in weekly.items():
-        if weeks.get(start) and weeks[start].phase_type == "accumulation":
+        if period_modes[start] == {"manual"} or (period_modes[start] == {"legacy"} and weeks.get(start) and weeks[start].phase_type == "accumulation"):
             for key in bucket["reps"]:
                 comparable[(group, key)].add(start)
     rows = []
     signals = []
     for (start, group), data in sorted(weekly.items()):
-        week = weeks.get(start)
-        phase = week.phase_type if week else "accumulation"
+        week = weeks.get(start) if period_modes[start] == {"legacy"} else None
+        phase = period_phase(start)
         custom = json.loads(week.targets_json or "{}").get(group, [12, 18, 20]) if week else [12, 18, 20]
         target_low = min(custom[1], custom[0] + 2 * max(0, (week.week_number if week else 1) - 1))
         target_high = min(custom[1], target_low + 2)
         scale = week.period_days / 7 if week and week.period_kind == "cycle" else 1
         quality = [mean(values) for key, values in data["reps"].items()
-                   if phase == "accumulation" and len(comparable[(group, key)]) >= 2]
-        has_target = group in VOLUME_TARGET_GROUPS
+                   if phase in ("accumulation", "manual") and len(comparable[(group, key)]) >= 2]
+        has_target = group in VOLUME_TARGET_GROUPS and phase not in ("manual", "mixed")
         row = {"week_start": start.isoformat(), "period_days": week.period_days if week else 7,
                "period_kind": week.period_kind if week else "week", "group": group, "phase": phase,
                "deload_reason": week.deload_reason if week else None,
@@ -134,15 +145,17 @@ def progress_for_user(db: Session, user_id: int) -> dict:
         rows.append(row)
     total_comparable = defaultdict(set)
     for start, bucket in totals.items():
-        if weeks.get(start) and weeks[start].phase_type == "accumulation":
+        if period_modes[start] == {"manual"} or (period_modes[start] == {"legacy"} and weeks.get(start) and weeks[start].phase_type == "accumulation"):
             for key in bucket["reps"]:
                 total_comparable[key].add(start)
     summary = []
     for start, bucket in sorted(totals.items()):
-        week = weeks.get(start)
-        phase = week.phase_type if week else next(iter(bucket["phases"])) if len(bucket["phases"]) == 1 else "mixed"
+        week = weeks.get(start) if period_modes[start] == {"legacy"} else None
+        phase = period_phase(start)
+        if period_modes[start] == {"legacy"} and week is None:
+            phase = next(iter(bucket["phases"])) if len(bucket["phases"]) == 1 else "mixed"
         quality = [mean(values) for key, values in bucket["reps"].items()
-                   if phase == "accumulation" and len(total_comparable[key]) >= 2]
+                   if phase in ("accumulation", "manual") and len(total_comparable[key]) >= 2]
         missed = bool(week and phase == "deload" and week.missed_deload)
         summary.append({"week_start": start.isoformat(), "period_days": week.period_days if week else 7,
                         "period_kind": week.period_kind if week else "week", "group": "Все мышцы",

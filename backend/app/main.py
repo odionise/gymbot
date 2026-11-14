@@ -10,7 +10,7 @@ from aiogram import Bot
 from aiogram.types import Update
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
 
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     migrate(engine)
     bot = Bot(settings.bot_token) if settings.bot_token and settings.bot_token != "replace-with-botfather-token" else None
     app.state.bot = bot
-    task = asyncio.create_task(reminder_loop(bot)) if bot and settings.reminders_enabled and not on_vercel else None
+    task = None  # Training is started manually; scheduled workout notices are disabled.
     if bot and settings.app_env == "production" and not on_vercel:
         await bot.set_webhook(
             f"{settings.public_url.rstrip('/')}/telegram/webhook",
@@ -203,12 +203,7 @@ async def scheduled_reminders(authorization: str | None = Header(default=None)):
     secret = os.environ.get("CRON_SECRET")
     if not secret or not secrets.compare_digest(authorization or "", f"Bearer {secret}"):
         raise HTTPException(403, "Forbidden")
-    if not get_settings().reminders_enabled:
-        return {"sent": 0}
-    bot = app.state.bot
-    if bot is None:
-        raise HTTPException(503, "Bot unavailable")
-    return {"sent": await send_due_reminders(bot)}
+    return {"sent": 0}
 
 
 @app.post("/telegram/webhook")
@@ -415,12 +410,6 @@ def update_template(template_id: str, data: TemplateIn, user: User = Depends(pro
 @app.delete("/api/templates/{template_id}")
 def delete_template(template_id: str, user: User = Depends(program_user), db: Session = Depends(get_db)):
     item = owned_template(db, user, template_id)
-    active_cycle = db.scalar(select(TrainingWeek).where(
-        TrainingWeek.user_id == user.telegram_id, TrainingWeek.period_kind == "cycle",
-    ).order_by(TrainingWeek.week_start.desc()))
-    if active_cycle and not cycle_complete(db, active_cycle, datetime.now(ZoneInfo(user.timezone)).date()) \
-            and any(slot["template_id"] == template_id for slot in cycle_schedule(active_cycle)):
-        raise HTTPException(409, "Тренировка входит в текущий цикл. Завершите цикл перед удалением.")
     item.active = False
     db.commit()
     return {"ok": True}
@@ -630,6 +619,91 @@ def start_session(template_id: str, user: User = Depends(current_user), db: Sess
     return session_dict(session, template)
 
 
+@app.get("/api/sessions/active")
+def active_manual_sessions(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    items = db.scalars(select(WorkoutSession).where(
+        WorkoutSession.user_id == user.telegram_id, WorkoutSession.entry_mode == "manual",
+        WorkoutSession.status != "completed",
+    ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results))
+     .order_by(WorkoutSession.created_at.desc(), WorkoutSession.id.desc())).all()
+    return [session_dict(item, db.get(WorkoutTemplate, item.template_id)) for item in items]
+
+
+@app.get("/api/templates/{template_id}/last-completed")
+def last_completed_template_session(template_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    template = owned_template(db, user, template_id)
+    item = db.scalar(select(WorkoutSession).where(
+        WorkoutSession.user_id == user.telegram_id, WorkoutSession.template_id == template.id,
+        WorkoutSession.status == "completed",
+        or_(WorkoutSession.entry_mode == "manual",
+            and_(WorkoutSession.phase_type == "accumulation"),
+            and_(WorkoutSession.phase_type.is_(None), WorkoutSession.phase != 0)),
+    ).options(selectinload(WorkoutSession.exercises).selectinload(SessionExercise.results))
+     .order_by(WorkoutSession.completed_at.desc().nulls_last(), WorkoutSession.id.desc()))
+    return session_dict(item, template) if item else None
+
+
+@app.post("/api/templates/{template_id}/manual-start")
+def start_manual_session(template_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    locked_row(db, User, User.telegram_id == user.telegram_id)
+    template = locked_row(db, WorkoutTemplate, WorkoutTemplate.id == template_id,
+                          WorkoutTemplate.user_id == user.telegram_id, WorkoutTemplate.active.is_(True))
+    if template is None:
+        raise HTTPException(404, "Тренировка не найдена")
+    existing = db.scalar(select(WorkoutSession).where(
+        WorkoutSession.template_id == template_id, WorkoutSession.entry_mode == "manual",
+        WorkoutSession.status != "completed",
+    ).order_by(WorkoutSession.created_at.desc()))
+    if existing:
+        return session_dict(existing, template)
+    exercises = [exercise for exercise in template.exercises if exercise.active]
+    if not exercises:
+        raise HTTPException(409, "Сначала добавьте упражнения в тренировку")
+    local_date = datetime.now(ZoneInfo(user.timezone)).date()
+    same_day = db.scalar(select(WorkoutSession).where(
+        WorkoutSession.template_id == template_id, WorkoutSession.scheduled_date == local_date))
+    if same_day:
+        if same_day.status != "planned" or any(item.results or item.actual_duration_minutes for item in same_day.exercises):
+            raise HTTPException(409, "Эта тренировка уже начата сегодня")
+        # An untouched session made by the old schedule can become manual.
+        # Recorded sets and completed snapshots are never converted.
+        same_day.entry_mode = "manual"
+        same_day.week_id = None
+        same_day.cycle_day = None
+        same_day.phase = 1
+        same_day.phase_type = "accumulation"
+        for item in same_day.exercises:
+            item.target_weight = 0
+            item.target_reps = 0
+            item.min_reps = 0
+            item.max_reps = 0
+            item.target_rir = None
+            item.recommendation_context_json = None
+            item.action_label = None
+            item.target_duration_minutes = None
+        db.commit()
+        return session_dict(same_day, template)
+    session = WorkoutSession(user_id=user.telegram_id, template_id=template_id,
+        template_name=template.name, muscle_group=template.muscle_group,
+        scheduled_date=local_date, phase=1, phase_type="accumulation", entry_mode="manual")
+    db.add(session)
+    db.flush()
+    for exercise in exercises:
+        movement = movement_for(db, exercise, user.telegram_id)
+        timed = movement.kind != "strength"
+        db.add(SessionExercise(session_id=session.id, exercise_id=exercise.id,
+            movement_id=movement.id, name=movement.name, position=exercise.position,
+            kind=movement.kind, target_duration_minutes=None,
+            weight_step=None if timed else 0.5,
+            sets_count=0 if timed else exercise.sets_count,
+            target_weight=0, target_reps=0, min_reps=0, max_reps=0,
+            target_rir=None, primary_group=movement.primary_group,
+            secondary_groups=movement.secondary_groups, is_anchor=movement.is_anchor))
+    db.commit()
+    db.refresh(session)
+    return session_dict(session, template)
+
+
 @app.get("/api/templates/{template_id}/preview", response_model=SessionPreviewOut)
 def template_preview(template_id: str, on_date: date, response: Response,
                      user_id: int = Depends(authenticated_user_id), db: Session = Depends(get_preview_db)):
@@ -706,7 +780,8 @@ def change_sets_count(item_id: str, data: SetsCountIn, user: User = Depends(curr
     if session.status == "completed" or any(r.is_working and r.set_index > data.sets_count for r in item.results):
         raise HTTPException(409, "Cannot remove a recorded set")
     item.sets_count = data.sets_count
-    record_manual_target(item, sets_count=data.sets_count)
+    if session.entry_mode != "manual":
+        record_manual_target(item, sets_count=data.sets_count)
     db.commit()
     return session_detail(session.id, user, db)
 
@@ -782,9 +857,9 @@ def complete_session(session_id: str, user: User = Depends(current_user), db: Se
                else len([r for r in item.results if r.is_working]) != item.sets_count) for item in session.exercises):
         raise HTTPException(400, "Record all sets or skip the exercise")
     actual_date = datetime.now(ZoneInfo(user.timezone)).date()
-    if user.cycle_days is None and vacation_override(db, user.telegram_id, actual_date):
+    if session.entry_mode != "manual" and user.cycle_days is None and vacation_override(db, user.telegram_id, actual_date):
         raise HTTPException(409, "Во время отпуска завершить тренировку нельзя")
-    if session.phase_type is not None:
+    if session.entry_mode != "manual" and session.phase_type is not None:
         actual_week = resolve_week(db, user.telegram_id, actual_date)
         if actual_week.phase_type == "vacation":
             raise HTTPException(409, "Во время отпуска завершить тренировку нельзя")

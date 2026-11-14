@@ -23,11 +23,5 @@
     { "source": "/fonts/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }] },
     { "source": "/anatomy/(.*)", "headers": [{ "key": "Cache-Control", "value": "public, max-age=86400" }] },
     { "source": "/api/(.*)", "headers": [{ "key": "Cache-Control", "value": "private, no-store" }] }
-  ],
-  "schedules": {
-    "reminders": {
-      "schedule": "*/15 * * * *",
-      "path": "/api/internal/reminders"
-    }
-  }
+  ]
 }

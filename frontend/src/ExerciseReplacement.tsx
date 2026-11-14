@@ -37,12 +37,12 @@ export function ExerciseReplacement({ exercise, movements, detailGroups, onClose
   const [saveError, setSaveError] = useState('')
   const [conflict, setConflict] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [weight, setWeight] = useState('')
-  const [step, setStep] = useState('2.5')
+  const [weight] = useState('0')
+  const [step] = useState('0.5')
   const [sets, setSets] = useState('3')
-  const [repMin, setRepMin] = useState('6')
-  const [repMax, setRepMax] = useState('12')
-  const [minutes, setMinutes] = useState('')
+  const [repMin] = useState('1')
+  const [repMax] = useState('50')
+  const [minutes] = useState('1')
   const movement = movements.find(item => item.id === movementId)
   const filteredMovements = filterMovements(movements, muscleFilter, search)
   const query = normalizeMovementSearch(search)
@@ -62,7 +62,7 @@ export function ExerciseReplacement({ exercise, movements, detailGroups, onClose
   const chooseMovement = (id: string) => {
     setMovementId(id); setHistoryMode('new'); setHistoryId('')
     // A replacement never inherits another movement's starting weight or time.
-    setWeight(''); setMinutes(''); setSaveError(''); setConflict(false)
+    setSaveError(''); setConflict(false)
   }
   const strength = movement?.kind === 'strength'
   const validNumbers = strength
@@ -117,16 +117,14 @@ export function ExerciseReplacement({ exercise, movements, detailGroups, onClose
         <ChoiceDropdown label="База результатов" value={historyMode} options={[{ value: 'new', label: 'Начать новую базу' }, ...(options.options.length ? [{ value: 'resume', label: 'Продолжить прежнюю историю' }] : [])]} onChange={value => { if (!busy) { setHistoryMode(value as ReplacementInput['history_mode']); setHistoryId('') } }} />
         {historyMode === 'resume' ? <>
           <ChoiceDropdown label="Прежняя база" value={historyId} placeholder="Выберите базу результатов" options={options.options.map(item => ({ value: item.history_id, label: historyLabel(item) }))} onChange={value => { if (!busy) setHistoryId(value) }} />
-          {selectedHistory && <><p className="fieldHelp">{historyLabel(selectedHistory)}</p><p className="fieldHelp">Будет продолжена выбранная база. Вес рассчитывается по её собственным результатам; это не обязательно последний записанный вес.</p></>}
-        </> : <p className="fieldHelp">Прежние результаты останутся в истории. Для новой базы используются заданные ниже стартовые параметры.</p>}
-        {!options.options.length && <p className="fieldHelp">Подходящей прежней базы здесь нет. Задайте явный старт.</p>}
+          {selectedHistory && <><p className="fieldHelp">{historyLabel(selectedHistory)}</p><p className="fieldHelp">Будет продолжена выбранная база. Предыдущие результаты останутся доступны для сравнения.</p></>}
+        </> : <p className="fieldHelp">Прежние результаты останутся в истории. Новая запись начнётся без автоматических целей.</p>}
+        {!options.options.length && <p className="fieldHelp">Подходящей прежней базы здесь нет. Новую запись можно начать без прошлых результатов.</p>}
         {options.excluded_legacy && <p className="fieldHelp">Часть старой истории нельзя достоверно связать с этим движением. Эти записи сохранены, но не предлагаются для продолжения.</p>}
       </>}
       {strength ? <>
-        <div className="fieldGrid">{numberField(historyMode === 'new' ? 'Стартовый вес, кг' : 'Старт без подходящей истории, кг', weight, setWeight, 0, 1000, 'any')}{numberField('Шаг веса, кг', step, setStep, 0.01, 100, '0.01')}{numberField('Базовых подходов', sets, setSets, 1, 12)}</div>
-        <div className="fieldGrid">{numberField('Повторы от', repMin, setRepMin, 1, 50)}{numberField('Повторы до', repMax, setRepMax, 1, 50)}</div>
-        <p className="fieldHelp">Ноль килограммов допустим, если вы ввели его явно. Шаг веса — от 0,01 кг, до двух знаков после запятой. ПДО задаётся фазой недели или правилом возвращения.</p>
-      </> : <><div className="fieldGrid">{numberField('План, минут', minutes, setMinutes, 1, 600)}</div><p className="fieldHelp">Цель по времени задаётся здесь. Автоматической прибавки минут нет.</p></>}
+        <div className="fieldGrid">{numberField('Подходов по умолчанию', sets, setSets, 1, 12)}</div>
+      </> : <><p className="fieldHelp">Фактическое время будет записано во время занятия.</p></>}
     </>}
     {saveError && <div><p className="fieldError" role="alert">{saveError}</p><p className="fieldHelp">Ввод сохранён. Если ответ потерялся, сначала обновите программу и проверьте, применена ли замена.</p>{conflict && <button type="button" className="textButton" disabled={busy} onClick={() => run(async () => {})}>Обновить программу</button>}</div>}
     <button className="primaryButton" type="submit" disabled={busy || !canSave}>{busy ? 'Сохраняем замену…' : 'Заменить упражнение'}</button>

@@ -156,6 +156,7 @@ class WorkoutSession(Base):
     week_id: Mapped[str | None] = mapped_column(ForeignKey("training_weeks.id"))
     cycle_day: Mapped[int | None] = mapped_column(Integer)
     phase_type: Mapped[str | None] = mapped_column(String(16))
+    entry_mode: Mapped[str] = mapped_column(String(16), default="scheduled")
     week: Mapped["TrainingWeek | None"] = relationship()
     exercises: Mapped[list["SessionExercise"]] = relationship(back_populates="session", order_by="SessionExercise.position", cascade="all, delete-orphan")
 
