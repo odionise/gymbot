@@ -72,7 +72,7 @@ export function OneRepFlow({ templates, onProgram, onActiveChange }: { templates
   const session = useRef<WorkoutSession | null>(null)
   const previous = useRef<WorkoutSession | null>(null)
   const queue = useRef<Promise<void>>(Promise.resolve())
-  const syncFailed = useRef(false)
+  const finishing = useRef(false)
   const [step, setStep] = useState<'choice' | 'workout' | 'summary'>('choice')
   const [doc, setDoc] = useState('')
   const [height, setHeight] = useState(600)
@@ -111,7 +111,6 @@ export function OneRepFlow({ templates, onProgram, onActiveChange }: { templates
       : lightExercises(template, catalog, past)
     current.current = plans
     synced.current = structuredClone(plans)
-    syncFailed.current = false
     session.current = ongoing
     previous.current = past
     setChosen(template); setLight(isLight); setActive(null); setStep('workout')
@@ -173,22 +172,40 @@ export function OneRepFlow({ templates, onProgram, onActiveChange }: { templates
   }
 
   const finish = async (plan: PlanExercise[]) => {
-    if (!chosen || busy) return
+    if (!chosen || finishing.current) return
+    finishing.current = true
     setBusy(true); setError('')
     try {
-      await queue.current
-      if (syncFailed.current) throw new Error('Часть подходов не сохранилась. Проверьте занятие и завершите его повторно.')
       if (!plan.some(item => !item.skipped)) throw new Error('Отметьте хотя бы одно упражнение')
-      if (!light && session.current) session.current = await api.complete(session.current.id)
+      if (plan.some(item => !item.skipped && (item.kind === 'strength'
+        ? item.work.length === 0 || item.work.some(set => !set.done) || item.warm.some(set => !set.done)
+        : !item.durationDone))) throw new Error('Запишите все подходы или пропустите упражнение')
+      await queue.current
+      if (!light) {
+        if (!session.current) throw new Error('Занятие не создано. Вернитесь к выбору тренировки.')
+        // Re-read the recorded facts: a failed response may still have committed a set.
+        // The final snapshot also covers a last click whose state message arrived late.
+        const saved = await api.session(session.current.id)
+        session.current = saved
+        synced.current = plan.map(item => {
+          const exercise = saved.exercises.find(row => row.id === item.id)
+          if (!exercise) throw new Error(`Упражнение «${item.name}» не найдено в занятии`)
+          return fromExercise(exercise)
+        })
+        await sync(plan)
+        session.current = await api.complete(session.current.id)
+      }
+      setError('')
       const today = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(new Date())
       setDoc(summaryHtml.replace('__SUMMARY_DATA__', scriptJson(summaryData(plan, previous.current)))
         .replace('__SUMMARY_TITLE__', escapeHtml(chosen.name)).replace('__SUMMARY_DATE__', today))
       setStep('summary'); setHistory(items => session.current ? [session.current, ...items] : items)
     } catch (err) {
-      setError((err as Error).message)
-      setDoc(workoutHtml.replace('__WORKOUT_PLANS__', scriptJson(current.current)).replace('__WORKOUT_TITLE__', escapeHtml(chosen.name)))
+      const message = (err as Error).message
+      setError(message)
+      frame.current?.contentWindow?.postMessage({ source: 'one-rep-parent', type: 'finish-error', message }, '*')
     }
-    finally { setBusy(false) }
+    finally { finishing.current = false; setBusy(false) }
   }
 
   useEffect(() => {
@@ -200,15 +217,8 @@ export function OneRepFlow({ templates, onProgram, onActiveChange }: { templates
       if (message.type === 'state' && message.plan) {
         const next = structuredClone(message.plan)
         current.current = next
-        queue.current = queue.current.then(() => sync(next)).catch(async err => {
-          syncFailed.current = true
+        queue.current = queue.current.then(() => sync(next)).catch(err => {
           setError(`Не удалось сохранить изменение: ${(err as Error).message}`)
-          if (session.current) {
-            try {
-              session.current = await api.session(session.current.id)
-              if (chosen) showWorkout(chosen, session.current, previous.current, false, movements)
-            } catch { /* keep current error */ }
-          }
         })
       }
       if (message.type === 'complete' && message.plan) void finish(message.plan)
@@ -225,6 +235,6 @@ export function OneRepFlow({ templates, onProgram, onActiveChange }: { templates
     {step !== 'choice' && <button className="oneRepBack" type="button" onClick={reset}>← К выбору тренировки</button>}
     {step === 'workout' && light && <p className="oneRepLight">Лёгкая тренировка · результаты не сохраняются</p>}
     <iframe ref={frame} title={step === 'choice' ? 'Выбор тренировки' : step === 'workout' ? 'Ход тренировки' : 'Итоги тренировки'} sandbox="allow-scripts" srcDoc={doc} style={{ height }} />
-    {busy && <p className="oneRepStatus" role="status">Открываем тренировку…</p>}
+    {busy && <p className="oneRepStatus" role="status">{finishing.current ? 'Сохраняем тренировку…' : 'Открываем тренировку…'}</p>}
   </div>
 }
